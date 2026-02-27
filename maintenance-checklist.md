@@ -46,10 +46,18 @@ The other two read the same instructions via symlink. They don't have hooks, ski
 - [ ] Search for Anthropic employee blog posts / personal setups
 - [ ] Search for new papers on: agent evaluation, prompt engineering, CLAUDE.md patterns
 - [ ] Check Trail of Bits, Simon Willison, Hamel Husain for agent security/best practices posts
+- [ ] Check Kapoor/Narayanan (normaltech.ai) for reliability research updates
 - [ ] Save interesting papers to corpus: `mcp__research__save_paper`
 - [ ] Fetch + read key papers: `mcp__research__fetch_paper` + `read_paper`
 - [ ] Export to selve: `mcp__research__export_for_selve` → `./selve update`
 - [ ] Update `frontier-agentic-models.md` with significant findings
+- [ ] **Use Exa for recency searches, not S2** (S2 has no date filtering)
+
+### 4a. Papers Pending Save (2026-02-27 sweep)
+- [ ] arXiv:2602.16666 — Princeton reliability (Kapoor/Narayanan/Rabanser). 14 models, 12 dimensions.
+- [ ] arXiv:2601.17915 — EoG graph-guided investigation (IBM). 7x Majority@k gain. Table 3 = instructions alone fail.
+- [ ] arXiv:2602.11224 — Agent-Diff state-diff evaluation. Documentation Hub vs Non-Hub experiment.
+- [ ] arXiv:2601.06112 — ReliabilityBench. pass^k metric, chaos engineering for agents.
 
 ### 5. Skills Propagation
 When updating a skill in `~/.claude/skills/` (user-level):
