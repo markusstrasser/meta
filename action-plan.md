@@ -18,7 +18,7 @@ After implementation: every Claude session in intel automatically operates with 
 
 ### 1.1 Trim CLAUDE.md to ~120 lines
 
-Current: ~244 lines. Community consensus and Anthropic's own data: past ~150 lines, the model stops absorbing instructions equally. Important rules get lost in noise.
+Current: ~244 lines. Instruction-following degrades gradually as instruction sets grow and conflict (GPT-5.2: "no evidence for a specific ~150 line threshold"). Keep always-loaded instructions short; push detail into selectively-loaded rules/skills.
 
 **Move out:**
 - Common Commands section (80+ lines) → already in `/commands` skill
@@ -41,20 +41,16 @@ Never start responses with positive adjectives about the user's input.
 Skip flattery and respond directly. Find what's wrong first.
 ```
 
-### 1.2 Add Amendment Rules to CONSTITUTION.md
+### 1.2 ~~Add Amendment Rules to CONSTITUTION.md~~ → Single Line
 
-Hart's secondary rules — currently missing. Required for autonomous operation.
+*Gemini review: "For a 1-person project, writing formal Amendment Rules is administrative bloat."*
 
+Replace the full amendment rules section with one line in CLAUDE.md:
 ```markdown
-## Amendment Rules
-- CONSTITUTION.md: Human approval required. Never auto-modified.
-- priors.md base rates: Require N>=3 new cases or multi-model review. Log prior→evidence→posterior.
-- scoring.py formulas: Changes require backtest on held-out data before merge.
-- MEMORY.md: AI may add entries during sessions. Entries require evidence from 2+ sessions.
-  Quarterly human review to prune stale entries.
-- .claude/rules/: AI may propose. Human approves before commit.
-- Entity files: AI may append to ## Signal Inbox. Human writes narrative sections.
+Do not edit CONSTITUTION.md. You may update priors.md based on backtest results (n >= 10% of prior ESS).
 ```
+
+The ESS-based criterion replaces "N>=3" (GPT-5.2: "Beta updates are valid for any n>=0; N>=3 is not a statistical threshold"). For a prior with ESS=10, need 1 new case. For ESS=100, need 10.
 
 ### 1.3 Add Epistemic Discipline Rule
 
@@ -150,23 +146,19 @@ uvx --with duckdb --with yfinance python3 tools/source_eval.py resolve 2>&1 | te
 
 ### 3.3 Create corrections register
 
-New file: `analysis/corrections.md`
+**Format: CSV** (not markdown — need SQL queryability for measuring error-correction rate).
 
-Template:
-```markdown
-# Corrections Register
+New file: `datasets/corrections.csv`
+New tool: `tools/log_correction.py` (agent calls this when fixing an error)
 
-Track errors, when caught, cost/impact, and fix applied. This IS the error-correction rate metric.
+Columns: `date,error,how_caught,impact_level,impact_dollars,fix,lesson,commit_sha,time_to_detect_days,time_to_fix_days`
 
-## Format
-| Date | Error | How Caught | Impact | Fix | Lesson |
-|------|-------|-----------|--------|-----|--------|
-| 2026-02-27 | prior_odds passes probability not odds | GPT-5.2 math review | Small (9.09% vs 10%) | Fix in fuse_evidence() | Always verify probability↔odds at API boundaries |
-| 2026-02-27 | TOUCH resolution inflates accuracy | Multi-model review | Medium (win rate overstated) | Default to TERMINAL | Precommit resolution mode at prediction time |
-| 2026-02-27 | scoring.py E[LLR] comment wrong | GPT-5.2 independent verification | Low (comment only) | Fix comment | Mathematical comments need verification |
-```
+**Metrics (GPT-5.2 derivation):**
+1. Primary: impact-weighted corrections per dollar (LLM cost)
+2. Secondary: median time-to-detect, median time-to-fix
+3. Tertiary: corrections per decision (epistemic discipline under real action)
 
-Every fix commit should add a row. This makes the error-correction rate measurable (Popper).
+Every fix commit should call `log_correction.py`. DuckDB view for aggregation.
 
 ---
 
@@ -255,24 +247,32 @@ Key design decisions validated by research:
 
 ---
 
-## Implementation Order
+## Implementation Order (Revised After Multi-Model Review)
 
-| Priority | Item | Effort | Error-Correction Impact |
-|----------|------|--------|------------------------|
-| 1 | Trim CLAUDE.md + add generative principle | 1 hour | Every session starts better-oriented |
-| 2 | Add prediction_tracker resolve to daily cron | 5 min | Closes the Brier feedback loop |
-| 3 | Create /competing-hypotheses skill | 2 hours | Structural adversarial forcing on every lead |
-| 4 | Create corrections register | 30 min | Makes error-correction rate measurable |
-| 5 | Add .claude/rules/epistemics.md | 30 min | Epistemic discipline loads automatically |
-| 6 | Create /multi-model-review skill | 2 hours | Replaces ad hoc "use gemini to review" |
-| 7 | Add amendment rules to CONSTITUTION.md | 15 min | Enables autonomous methodology updates |
-| 8 | Kill conditions in entity YAML | 1 hour | Precommitment becomes checkable |
-| 9 | Open questions file | 30 min | Planning agency across sessions |
-| 10 | Add source_eval resolve to weekly cron | 5 min | Source credibility stays current |
-| 11 | Pre-commit scoring.py tests | 2 hours | Catches math errors before commit |
-| 12 | Autonomous loop MVP | 1 weekend | The whole point — headless entity refresh |
+*Resequenced based on Gemini 3.1 + GPT-5.2 review (2026-02-27). Key change: build replacements BEFORE trimming CLAUDE.md. See `review-action-plan.md` for full review synthesis.*
 
-**Total estimated effort:** ~2 days for items 1-11, 1 weekend for item 12.
+| Priority | Item | Effort | Error-Correction Impact | Review Change |
+|----------|------|--------|------------------------|---------------|
+| 1 | Add prediction_tracker resolve to daily cron | 5 min | Closes the Brier feedback loop | Was #2. Both models agree: highest ROI |
+| 2 | Add source_eval resolve to weekly cron | 5 min | Source credibility stays current | Was #10. Trivial effort, closes loop |
+| 3 | Create /competing-hypotheses skill | 2 hours | Structural adversarial forcing on every lead | UNCHANGED |
+| 4 | Create /multi-model-review skill | 2 hours | Replaces ad hoc "use gemini to review" | Was #6. Needed before CLAUDE.md trim |
+| 5 | Add .claude/rules/epistemics.md | 30 min | Epistemic discipline loads automatically | UNCHANGED |
+| 6 | Trim CLAUDE.md + generative principle | 1 hour | Every session starts better-oriented | Was #1. "Build wall before tearing fence" |
+| 7 | Create corrections register (CSV) | 30 min | Makes error-correction rate measurable | FORMAT: CSV not markdown (Gemini) |
+| 8 | Kill conditions (simplified) | 30 min | Precommitment becomes checkable | SIMPLIFIED: single-line triggers only |
+| 9 | Open questions file | 30 min | Planning agency across sessions | UNCHANGED |
+| 10 | Pre-commit scoring.py tests | 2 hours | Catches math errors before commit | HAS INVARIANTS from GPT-5.2 now |
+| 11 | Autonomous loop MVP | 1 weekend | Headless entity refresh | ADDED: concurrency lock, $30/day cap, price freshness gate |
+| 12 | ~~Amendment rules~~ → 1 line in CLAUDE.md | 1 min | Prevents constitution drift | SIMPLIFIED per Gemini: "Do not edit CONSTITUTION.md" |
+
+**Total estimated effort:** ~2 days for items 1-10, 1 weekend for item 11.
+
+### Critical Additions from Review (Autonomous Loop Safety)
+- **Concurrency lock:** `fcntl.flock` or SQLite mutex. If lock held, cron exits immediately.
+- **Budget cap:** $30/day hard limit tracked in SQLite. Stop dispatching when hit.
+- **Price freshness gate:** prediction_tracker resolve skips if latest price >2 trading days old.
+- **healthcheck pre-flight:** Run healthcheck.py before each autonomous task (catches schema drift).
 
 ---
 
