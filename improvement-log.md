@@ -65,7 +65,7 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Sycophancy — compliance without epistemic challenge on safety-critical classification
 - **Proposed fix:** [rule] "Distinguish mechanistic vs. heuristic changes before implementing. Mechanistic (parser fix, known-good data source) can proceed. Heuristic (new classification rule based on correlation/prior) requires stating the false-negative risk and requesting confirmation."
 - **Severity:** high
-- **Status:** [ ] proposed
+- **Status:** [x] implemented — selve CLAUDE.md "Common Pitfalls" #8 (2026-02-28). Instructions-only; sycophancy is the hardest failure mode to enforce architecturally.
 
 ### [2026-02-28] BUILD-THEN-UNDO: Implemented and reverted heuristic auto-classification rules
 - **Session:** selve a2679f18
@@ -73,7 +73,7 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Build-then-undo — direct consequence of missing pushback (above)
 - **Proposed fix:** Same as above — epistemic challenge before building prevents the undo
 - **Severity:** medium
-- **Status:** [ ] proposed (linked to finding above)
+- **Status:** [x] implemented — linked to finding above (selve CLAUDE.md pitfall #8)
 
 ### [2026-02-28] TOKEN WASTE: 4 consecutive Read calls on same 700-line file
 - **Session:** selve a2679f18
@@ -81,7 +81,7 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Token waste — redundant file reads
 - **Proposed fix:** [architectural] Before issuing Read, check if the file content is already in recent context. Use Grep for targeted lookups instead of full file reads when only checking a specific function or line.
 - **Severity:** medium
-- **Status:** [ ] proposed
+- **Status:** [ ] deferred — a PreToolUse:Read hook would be too noisy (many legitimate re-reads). Claude Code already instructs agents to prefer Grep. Not worth the false-positive cost.
 
 ### [2026-02-28] RULE VIOLATION: Committed code without explicit user request
 - **Session:** selve a2679f18
@@ -89,4 +89,4 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Rule violation — auto-committing without explicit request
 - **Proposed fix:** [rule clarification] The branch workflow instruction ("commit changes") and the global "never commit unless asked" are in tension. Resolve: branch workflow implicitly authorizes commits when user requests branch-based implementation.
 - **Severity:** low (commits were well-structured and appropriate for branch workflow)
-- **Status:** [ ] proposed — may be a false positive given branch workflow context
+- **Status:** [x] implemented — clarified in global CLAUDE.md: branch workflow implicitly authorizes commits (2026-02-28)
