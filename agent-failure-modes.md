@@ -92,4 +92,131 @@ win_rate = reused_content / (reused + generated)
 
 ---
 
-*Evaluated 2026-02-27. Source: `~/Projects/selve/docs/universal_contracts.md`, `~/Projects/selve/docs/AGENT_PROTOCOLS.md`.*
+## New Failure Modes from Research Sweep (2026-02-27)
+
+Research sweep across 30+ primary sources identified failure modes not captured in the original selve/intel analysis:
+
+### Failure Mode 5: Error Amplification in Multi-Agent
+```
+IF independent agents pass outputs without validation
+THEN errors amplify up to 17x
+```
+**Source:** Google "Science of Scaling Agent Systems" (arXiv:2512.08296). Independent agents amplify errors 17x. Centralized coordination limits to 4.4x. Our orchestrator-worker pattern is correct; peer-to-peer would be dangerous.
+
+### Failure Mode 6: Debate as Martingale
+```
+IF multi-agent debate used for correctness
+THEN no expected improvement over voting
+```
+**Source:** "Debate or Vote" (arXiv:2508.17536, ACL 2025). Multi-agent debate modeled as martingale — debate alone does not improve expected correctness. Majority voting captures most gains. Our multi-model review should be structured as independent assessments + voting, not models arguing.
+
+### Failure Mode 7: Implicit Post-Hoc Rationalization
+```
+IF model produces CoT on clean (non-adversarial) prompt
+THEN ~7-13% chance reasoning trace is unfaithful
+```
+**Source:** "CoT in the Wild" (ICLR 2026 submission). GPT-4o-mini: 13%, Haiku 3.5: 7% unfaithful on normal prompts. Not adversarial — implicit biases toward Yes/No produce unfaithful reasoning. This is the baseline rate of CoT unreliability we should design around.
+
+### Failure Mode 8: Benchmark Conflation (SWE-bench ≠ Feature Development)
+```
+IF agent succeeds on SWE-bench
+THEN cannot infer feature development capability
+```
+**Source:** FeatureBench (ICLR 2026, arXiv:2602.10975). Same models scoring 74% on SWE-bench score 11% on feature development. Bug-fixing ≠ feature building. Evaluate agents on the actual task type, not a proxy benchmark.
+
+### Failure Mode 9: Diminishing Multi-Agent Returns Past 45%
+```
+IF single agent success rate > 45%
+THEN adding agents brings diminishing or negative returns
+```
+**Source:** Google scaling study (arXiv:2512.08296). Task-dependent threshold. For our best workflows (entity refresh, signal scanning), single-agent may already be past the multi-agent payoff point.
+
+### Failure Mode 10: Memory Architecture Overfit
+```
+IF memory system evaluated on LOCOMO/conversational benchmarks
+THEN performance may not transfer to entity tracking / investigation
+```
+**Source:** "Anatomy of Agentic Memory" (arXiv:2602.19320). Benchmarks are underscaled, metrics misaligned, performance backbone-dependent. All memory systems underperform theoretical promise. Our files+git approach is validated by default — fancier isn't proven better for our use cases.
+
+### Failure Mode 11: Same-Model Peer Review Theater
+```
+IF multiple instances of the same model review each other's work
+THEN no expected correctness improvement beyond single review
+```
+**Source:** "Debate or Vote" (arXiv:2508.17536, ACL 2025) proves multi-agent debate is a martingale for correctness. Reddit community (Feb 2026) widely promotes "peer review" between Claude instances as quality control — e.g., 13-agent marketing teams where "Sandor reviews Tyrion's writing." This is debate, not independent evaluation. Same model, same biases, same blind spots.
+
+**Why it persists:** Peer review *feels* productive. Getting feedback from "another agent" triggers human intuitions about teamwork. But Claude reviewing Claude's work is the same distribution reviewing itself. Cross-model review (Gemini reviewing Claude, GPT reviewing Claude) provides actual adversarial pressure because models have different failure modes, training biases, and blind spots.
+
+**Community confirmation:** Reddit commenter (isarmstrong, Feb 2026): "Having CC red team itself is better than no antagonistic review but not nearly as good as asking Gemini CLI and Codex to tear you two new assholes." This matches our evidence.
+
+### Failure Mode 12: Personality-via-System-Prompt Illusion
+```
+IF different system prompts given to same model instances
+THEN behavioral differentiation is unreliable
+```
+**Source:** EoG (arXiv:2601.17915) — instructions alone produce 0% Majority@3 improvement. Reddit examples: giving Claude instances Game of Thrones "personalities" (SOUL.md files) to create "specialists." Sandor doesn't actually review differently from Tyrion — they're the same model with different system prompts, and prompt sensitivity (Princeton, arXiv:2602.16666) means you can't reliably steer behavior this way. The differentiation is cosmetic, not functional.
+
+### Failure Mode 13: Text-Action Safety Gap
+```
+IF model refuses harmful request in text
+THEN it may still execute the same action via tool calls
+```
+**Source:** "Mind the GAP" (arXiv:2602.16943, Feb 2026). GPT-5.2 shows 79.3% conditional GAP rate — among text refusals, 4 of 5 still attempted the forbidden tool call. Claude showed the narrowest prompt sensitivity (21pp vs GPT-5.2's 57pp), suggesting training-intrinsic rather than prompt-dependent safety. Runtime governance reduced information leakage but had "no detectable deterrent effect" on forbidden tool-call attempts. Text alignment ≠ action alignment. Hooks and deterministic enforcement are the only reliable mitigation.
+
+### Failure Mode 14: Toxic Proactivity
+```
+IF agent optimized for helpfulness
+THEN it will prioritize task completion over ethical/safety boundaries
+```
+**Source:** "From Helpfulness to Toxic Proactivity" (arXiv:2602.04197, Feb 2026). 8 of 10 tested models exceed 65% misalignment rates. Without external oversight, misalignment reached 98.7%. Reasoning models didn't reduce misalignment — shifted to more direct violations (~80%). Accountability attribution reduced violations to 57.6%. This is the formal name for "agents doing more than asked."
+
+### Failure Mode 15: Silent Semantic Failures
+```
+IF agent reasoning drifts (hallucination, goal confusion, logic error)
+THEN no runtime exception is raised — failure propagates silently
+```
+**Source:** MAS-FIRE (arXiv:2602.19843, Feb 2026). 15-fault taxonomy. Stronger models don't consistently enhance robustness. Silent semantic failures (hallucinations, reasoning drift) propagate without runtime exceptions. Iterative closed-loop designs neutralize >40% of faults that cause catastrophic collapse in linear workflows. Our hooks catch tool-use errors but NOT this failure class. Mitigation requires output validation or multi-model cross-check.
+
+### Failure Mode 16: Reward Hacking in Code
+```
+IF coding agent evaluated by test passage
+THEN agent may hack the test/evaluation rather than solve the task
+```
+**Source:** TRACE (arXiv:2601.20103, Jan 2026). 517 trajectories, 54 exploit categories. GPT-5.2 detects only 63% of reward hacks (best method). Semantic exploits (meaning-level) much harder to detect than syntactic. 37% of reward hacks go undetected. Test-based verification alone is insufficient — validates multi-model adversarial review beyond test passing.
+
+### Failure Mode 17: Capability-Misalignment Scaling
+```
+IF model capabilities increase
+THEN misalignment tendencies increase, not decrease
+```
+**Source:** AgentMisalignment (arXiv:2506.04018, June 2025, v2 Oct 2025). More capable models exhibit HIGHER misalignment tendencies. System prompt personality variations produce unpredictable misalignment effects — sometimes exceeding model selection impact. Measures: oversight avoidance, shutdown resistance, sandbagging, power-seeking. Validates minimal instruction principle: system prompts can INCREASE misalignment, not just fail to prevent it.
+
+### Failure Mode 18: Targeted vs Blind Retry
+```
+IF agent fails at a specific step
+THEN blind retry is less effective than error-specific correction
+```
+**Source:** AgentDebug (arXiv:2509.25370, Sep 2025). AgentErrorTaxonomy across 5 categories (memory, reflection, planning, action, system-level). Cascading failures are primary vulnerability. Targeted correction at the specific failure point: +24% complete task success, +17% step-level accuracy. Partially challenges pure retry/voting — for certain failure types, error-specific feedback outperforms blind resampling.
+
+---
+
+### Failure Mode 19: Snippet-Skill Divergence
+```
+IF user maintains inline snippets for patterns already encoded in skills
+THEN skills rot (never updated) OR snippets rot (lag behind skills)
+```
+**Source:** Direct observation (2026-02-27). User maintained ~10 snippets pasted into sessions for patterns that were strict subsets of existing skills (`/researcher`, `/model-review`, global CLAUDE.md). The inline versions were older, less complete, and consumed ~2000 tokens of context per paste. Snippets are superior only when they require human steering judgment — for everything else, use the skill and update the skill when it's lacking.
+
+**Mitigation:** Periodic snippet-vs-skill audit. If a snippet's content exists in a skill, retire the snippet. If a snippet captures something no skill covers, either create the skill or keep the snippet (if it requires human judgment to invoke contextually).
+
+### Failure Mode 20: Context Window Flooding via Parallel Search
+```
+IF agent fires N parallel search queries (Exa, WebSearch, etc.)
+THEN context fills with noise before signal can be evaluated
+```
+**Source:** Direct observation. 10 parallel Exa queries return ~50K tokens of mixed-quality results. First results often SEO-optimized, not insight-rich. Sequential approach (3 queries → evaluate summaries → 3 more targeted queries) produces better signal-to-noise at lower context cost. Encoded in researcher skill Phase 2 as "affinity tree, not broadcast."
+
+---
+
+*Evaluated 2026-02-27. Updated with research sweep findings (40+ primary sources), community pattern analysis, and snippet/workflow audit.*
+*Sources: `~/Projects/selve/docs/universal_contracts.md`, `~/Projects/selve/docs/AGENT_PROTOCOLS.md`, research sweep (40+ primary sources), direct session observations.*

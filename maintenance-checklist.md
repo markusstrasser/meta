@@ -12,10 +12,11 @@
 ### 2. Update Claude Code Docs (Claude releases only)
 - [ ] Check Claude Code changelog: `claude --version`, release notes
 - [ ] Claude Code source is not public — read the docs instead
-- [ ] Check for new hook types, skill features, MCP changes, settings options
+- [ ] Check for new hook types, skill features, MCP changes, settings options, **plugin capabilities**
 - [ ] Update `~/.claude/skills/` with any new capabilities
 - [ ] Update project `.claude/rules/` if new features change best practices
 - [ ] Check if CLAUDE.md spec changed (new fields, frontmatter, etc.)
+- [ ] Re-evaluate plugins if: rules support added, non-namespaced skills added, or collaboration starts
 
 ### 3. Cross-Agent Parity
 Each project should have:
@@ -58,12 +59,68 @@ The other two read the same instructions via symlink. They don't have hooks, ski
 - [ ] arXiv:2601.17915 — EoG graph-guided investigation (IBM). 7x Majority@k gain. Table 3 = instructions alone fail.
 - [ ] arXiv:2602.11224 — Agent-Diff state-diff evaluation. Documentation Hub vs Non-Hub experiment.
 - [ ] arXiv:2601.06112 — ReliabilityBench. pass^k metric, chaos engineering for agents.
+- [ ] arXiv:2512.08296 — Google scaling agent systems. 180 configs, +81%/-70% task-dependent. 45% threshold.
+- [ ] arXiv:2510.05381 — Du et al. "Context Length Alone Hurts" (EMNLP 2025). Recitation strategy.
+- [ ] arXiv:2602.10975 — FeatureBench (ICLR 2026). 11% feature dev vs 74% SWE-bench.
+- [ ] arXiv:2511.14136 — CLEAR framework. 60%→25% over 8 runs.
+- [ ] arXiv:2508.17536 — "Debate or Vote" (ACL 2025). Debate = martingale. Voting works.
+- [ ] arXiv:2602.16943 — Mind the GAP. Text-action safety gap. 79.3% conditional GAP rate.
+- [ ] arXiv:2602.04197 — Toxic Proactivity. 98.7% misalignment without oversight.
+- [ ] arXiv:2602.19843 — MAS-FIRE. Silent semantic failures. 15-fault taxonomy.
+- [ ] arXiv:2503.13657 — MAST taxonomy. 14 failure modes, 1600+ traces, 7 frameworks.
+- [ ] arXiv:2601.22290 — Six Sigma Agent. Mathematical proof for majority voting.
+- [ ] arXiv:2512.18470 — SWE-EVO. Long-horizon software evolution. 21% vs 65% SWE-bench.
+- [ ] arXiv:2601.03868 — What Matters for Safety Alignment. Post-training degrades safety.
+- [ ] arXiv:2506.04018 — AgentMisalignment. Capability-misalignment scaling.
+- [ ] arXiv:2601.20103 — TRACE. Reward hacking detection. 37% undetectable.
+- [ ] arXiv:2509.25370 — AgentDebug. Targeted correction +24% vs blind retry.
+
+### 4b. Monitor: RLM "Learned Context Folding" (arXiv:2512.24601)
+Prime Intellect's Recursive Language Models treat long prompts as external environment — LLM uses Python REPL to inspect/transform input, recursively calls sub-LLMs. **Never summarizes.** Frames compaction as information-lossy and delegation-to-code as superior.
+
+Why this matters: If delegation consistently beats compaction, our compaction contract may be suboptimal. We already use subagents for delegation — RLM formalizes this pattern.
+
+Watch for:
+- [ ] Independent replication (currently single lab, preprint only)
+- [ ] Latency measurements in production settings (recursive sub-calls add latency)
+- [ ] Comparison with compaction on tasks matching our workflows (entity refresh, research synthesis)
+- [ ] Whether Claude Code or similar tools adopt this pattern
+
+**Don't change anything yet.** Wait for independent replication. But if 2+ labs confirm delegation > compaction, revisit our compaction contract.
 
 ### 5. Skills Propagation
 When updating a skill in `~/.claude/skills/` (user-level):
 - [ ] Check if any project has a project-level override in `.claude/skills/`
 - [ ] If so, decide: update the project version or delete it to inherit user-level
 - [ ] Currently overridden in intel: `researcher`, `deep-research` (redirected), `competing-hypotheses`, `multi-model-review`, `thesis-check`, `new-dataset`, `commands`
+- [x] Intel `researcher` is a symlink to shared skill — updates propagate automatically
+- [x] `entity-management` flipped to `user-invocable: true` (2026-02-27)
+- [x] `model-review` skill exists at shared level (cross-model adversarial review via llmx)
+
+### 6. Global CLAUDE.md (`~/.claude/CLAUDE.md`)
+Created 2026-02-27. Loaded in every project session. Contains universal rules that don't belong in any single project:
+- No `Co-Authored-By: Claude` in git commits
+- AI-generated text (pasted or from llmx) treated as unverified — 4-step check, reference `model-guide`
+- Branch-work-merge workflow pattern
+- Proactive `/model-review` offering for non-trivial work
+
+When updating: keep it under ~30 lines. It competes with project CLAUDE.md for context.
+
+### 7. Snippet Retirement (2026-02-27)
+User snippets analyzed against skills/hooks/rules. Six snippets retired:
+- 6-phase research protocol → `/researcher` (strict superset)
+- Research tool instructions (`;tre`/`;t`) → researcher Phase 2
+- "Use gemini/gpt to review" → `/model-review`
+- "Pasted AI text, be critical" → global CLAUDE.md
+- "Git commit semantic, no claude" → global CLAUDE.md
+- Exa API docs block → researcher now encodes the philosophy
+
+Remaining as manual snippets (human steering, can't automate):
+- Post-session retro ("gotchas to eradicate") — manual invocation = snippet is superior
+- "Check ~/Projects/meta" — human judgment call
+- "Generate ideas to improve" — direction-setting
+- Parallel refactor agents — per-situation decision
+- "Sanity check controversial takes" — steering
 
 ## Project Setup for New Repos
 ```bash
@@ -77,6 +134,41 @@ echo ".claude/" >> .gitignore
 # Initialize Claude Code
 mkdir -p .claude/rules .claude/skills
 ```
+
+## Ideas / Future Work
+
+### Orchestrator MVP
+A Python script (not an LLM session) that runs the agent autonomously. Each task gets a fresh context — no context rot.
+
+**What it does:**
+```
+Every 15 minutes (cron):
+  1. Query SQLite task queue (what's stale? what signals fired?)
+  2. Pick highest-priority task
+  3. Run: claude -p "Update HIMS entity" --max-turns 15 --output-format json
+  4. Kill if stuck (subprocess timeout 30min)
+  5. Log result, pick next task
+```
+
+**MVP spec (from review-synthesis.md):** ~100 lines Python. Cron + SQLite + subprocess. No DAG, no diversity monitor, no Agent SDK (premature optimizations). Build it when paper trading demonstrates the system works manually.
+
+**Blocked by:** Paper trading validation. Don't automate a system that hasn't proven it works with human oversight.
+
+**Key design decisions (already validated by multi-model review):**
+- Fresh `claude -p` per task, NOT `--resume` (quadratic cost)
+- 15 turns max per task (context degrades beyond this)
+- Self-improvement is a dedicated fresh-context task every 5 tasks, not a wrap-up prompt
+- subprocess.run(timeout=1800) as watchdog
+- JSONL event log for debugging
+- Daily markdown summary for human review
+
+See `autonomous-agent-architecture.md` and `review-synthesis.md` for full design.
+
+### IB API Integration (Future Phase)
+Interactive Brokers API for agent-managed trading. $10K sandbox account. Outbox pattern: agent proposes → queue → execute. Pending paper trading validation proving consistent edge.
+
+### Fraud/Corruption Separation (Decide Later)
+Currently in intel as analysis/fraud/, analysis/sf/. May become separate repo if compute burden grows. Entity graph is shared regardless. Not urgent — the join is the moat.
 
 ## Key URLs to Monitor
 - Claude Code releases: `anthropic.com/claude-code` (no public changelog URL — check `claude --version`)
