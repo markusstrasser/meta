@@ -46,6 +46,16 @@ Reject everything else. Over-prescription rots faster than under-prescription.
 | Global hooks | `~/.claude/settings.json` | Loaded in every project |
 | Research MCP | `~/Projects/papers-mcp/` | Configured in `.mcp.json` per project |
 
+## Intel-Local Skills
+
+Intel has local skill variants that diverge from shared skills. Cross-model reviews may flag "gaps" that are actually covered here:
+
+| Shared skill | Intel-local variant | Difference |
+|-------------|---------------------|------------|
+| `competing-hypotheses` | `intel/.claude/skills/competing-hypotheses/` | Adds Bayesian LLR scoring via `ach_scorer.py` |
+| (none) | `intel/.claude/skills/thesis-check/` | Full adversarial trade-thesis stress-test (432 lines) |
+| `model-review` | `intel/.claude/skills/multi-model-review/` | Intel-specific review routing |
+
 ## Shared Hooks Inventory
 
 Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings.json files.
@@ -53,6 +63,7 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | Hook | Event | Blocks? | Deployed where | What it does |
 |------|-------|---------|----------------|--------------|
 | `pretool-bash-loop-guard.sh` | PreToolUse:Bash | exit 2 | Global | Blocks multiline for/while/if (zsh parse error #1) |
+| `pretool-search-burst.sh` | PreToolUse:search tools | exit 0/2 | Global | Warns at 4 consecutive searches, blocks at 8 without reading results |
 | `pretool-data-guard.sh` | PreToolUse:Write\|Edit | exit 2 | (available) | Blocks writes to protected paths (datasets/, .parquet, .duckdb) |
 | `postwrite-source-check.sh` | PostToolUse:Write\|Edit | exit 2 | Intel | Blocks research file writes without source tags |
 | `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Intel | Tracks consecutive Bash failures, warns after 5 |
