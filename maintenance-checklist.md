@@ -135,6 +135,31 @@ echo ".claude/" >> .gitignore
 mkdir -p .claude/rules .claude/skills
 ```
 
+## Session Analysis (Recurring)
+- [ ] Run `/session-analyst intel 5` — analyze last 5 intel sessions for behavioral anti-patterns
+- [ ] Run `/session-analyst selve 5` — analyze last 5 selve sessions
+- [ ] Review `improvement-log.md` for actionable findings
+- [ ] Implement proposed fixes (hooks > rules > instructions)
+- [ ] Measure: did the fix reduce the failure rate in subsequent sessions?
+
+**Frequency:** After major work sessions, or weekly during active development.
+**Tool:** `~/Projects/skills/session-analyst/` — preprocesses transcripts via `extract_transcript.py`, dispatches to Gemini for analysis.
+**Transcripts:** `~/.claude/projects/-Users-alien-Projects-{project}/` (native Claude Code storage, ~151 sessions across projects)
+
+## Shared Hooks (`~/Projects/skills/hooks/`)
+Reusable hook scripts symlinked into projects. All fail open (broken hook ≠ blocked work).
+
+| Hook | Type | What it does |
+|------|------|-------------|
+| `postwrite-source-check.sh` | PostToolUse | Blocks writes to research paths without source tags (exit 2) |
+| `stop-research-gate.sh` | Stop | Reminds about primary sources + disconfirmation before stopping |
+| `pretool-data-guard.sh` | PreToolUse | Generalized data file protection (configurable paths) |
+| `pretool-bash-loop-guard.sh` | PreToolUse | Blocks multiline for/while/if that causes zsh parse errors |
+| `posttool-bash-failure-loop.sh` | PostToolUse | Detects 5+ consecutive Bash failures, warns agent to stop retrying |
+
+**Deployed to:** intel (postwrite-source-check.sh, posttool-bash-failure-loop.sh, pretool-bash-loop-guard.sh)
+**Not yet deployed:** selve (evaluate after intel trial)
+
 ## Key Architecture Docs
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval decision framework, Groq/Gemini/Kimi assessment (2026-02-28)
 
