@@ -9,6 +9,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 ## Key Files
 - `maintenance-checklist.md` — pending improvements, monitoring list, sweep schedule
 - `agent-failure-modes.md` — documented failure modes from real sessions
+- `improvement-log.md` — structured findings from session analysis (session-analyst appends here)
 - `frontier-agentic-models.md` — research report on agentic model behavior (4 papers read in full)
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval, Groq/Gemini assessment, routing decision framework
 
@@ -31,6 +32,13 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 |-------|----------|-----------|
 | Global CLAUDE.md | `~/.claude/CLAUDE.md` | Loaded in every project (universal rules) |
 | Shared skills | `~/Projects/skills/` | Symlinked into each project's `.claude/skills/` |
+| Shared hooks | `~/Projects/skills/hooks/` | Referenced by path in each project's `settings.json` |
 | Project rules | `.claude/rules/` per project | Diverges intentionally (domain-specific) |
 | Project hooks | `.claude/settings.json` per project | Per-project, similar patterns |
+| Global hooks | `~/.claude/settings.json` | Loaded in every project (zsh loop guard) |
 | Research MCP | `~/Projects/papers-mcp/` | Configured in `.mcp.json` per project |
+
+## Session Forensics
+- Chat histories: `~/.claude/projects/-Users-alien-Projects-*/UUID.jsonl` (JSONL, one entry per message)
+- Error mining: Python script with `json.loads` per line, check `is_error`, `Exit code`, tool result content
+- Top error sources (Feb 2026): zsh multiline loops (178/wk), DuckDB column guessing (324/wk), llmx wrong flags (16/wk)
