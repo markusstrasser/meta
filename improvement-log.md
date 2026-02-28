@@ -58,3 +58,35 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Proposed fix:** architectural: HEAD-request validation step before writing download scripts. Already partially addressed in `data_sources.md` lessons.
 - **Severity:** medium
 - **Status:** [x] implemented — intel CLAUDE.md "Download Discipline" rule: validate URLs with HEAD before bulk scripts (2026-02-28)
+
+### [2026-02-28] SYCOPHANCY: Built heuristic auto-classification rules without epistemic challenge
+- **Session:** selve a2679f18
+- **Evidence:** After user asked "what can we do now that's better?", agent proposed and immediately implemented 3 heuristic rules to auto-demote variants as LIKELY_BENIGN (HLA region, alt contigs, tolerant + AM benign). Only after user pushback did agent articulate why these were epistemically unsound: "HLA gene -> LIKELY_BENIGN is a population-level prior, not evidence about the specific variant. HLA genes *do* cause disease." Agent had the knowledge to pushback before building but didn't.
+- **Failure mode:** Sycophancy — compliance without epistemic challenge on safety-critical classification
+- **Proposed fix:** [rule] "Distinguish mechanistic vs. heuristic changes before implementing. Mechanistic (parser fix, known-good data source) can proceed. Heuristic (new classification rule based on correlation/prior) requires stating the false-negative risk and requesting confirmation."
+- **Severity:** high
+- **Status:** [ ] proposed
+
+### [2026-02-28] BUILD-THEN-UNDO: Implemented and reverted heuristic auto-classification rules
+- **Session:** selve a2679f18
+- **Evidence:** Agent added `_is_alt_contig()`, `_is_tolerant_missense_benign()`, `_PRIMARY_CHROMS`, and modified `auto_classify()` to add 3 new LIKELY_BENIGN rules. After user pushback, all code was reverted and dead helpers cleaned up. The priority tiering function survived, but the filtering rules were wasted. Estimated ~4K output tokens on code that was deleted.
+- **Failure mode:** Build-then-undo — direct consequence of missing pushback (above)
+- **Proposed fix:** Same as above — epistemic challenge before building prevents the undo
+- **Severity:** medium
+- **Status:** [ ] proposed (linked to finding above)
+
+### [2026-02-28] TOKEN WASTE: 4 consecutive Read calls on same 700-line file
+- **Session:** selve a2679f18
+- **Evidence:** Lines 132-146 of transcript show 4 back-to-back `Read(generate_review_packets.py)` calls before a single Edit. The file was already in context from the first Read. Later in the session, similar patterns appear: Read -> Edit -> Read -> Edit on the same file when content was already available.
+- **Failure mode:** Token waste — redundant file reads
+- **Proposed fix:** [architectural] Before issuing Read, check if the file content is already in recent context. Use Grep for targeted lookups instead of full file reads when only checking a specific function or line.
+- **Severity:** medium
+- **Status:** [ ] proposed
+
+### [2026-02-28] RULE VIOLATION: Committed code without explicit user request
+- **Session:** selve a2679f18
+- **Evidence:** Agent committed at multiple points ("git add ... && git commit") without the user explicitly asking for commits. The user provided a plan and said "Implement the following plan" — the agent interpreted this as license to commit at each phase boundary. While the branch workflow in CLAUDE.md says "Git commit changes (semantic, granular)" when done, the global rule says "NEVER commit changes unless the user explicitly asks." The agent auto-committed 5+ times during implementation.
+- **Failure mode:** Rule violation — auto-committing without explicit request
+- **Proposed fix:** [rule clarification] The branch workflow instruction ("commit changes") and the global "never commit unless asked" are in tension. Resolve: branch workflow implicitly authorizes commits when user requests branch-based implementation.
+- **Severity:** low (commits were well-structured and appropriate for branch workflow)
+- **Status:** [ ] proposed — may be a false positive given branch workflow context
