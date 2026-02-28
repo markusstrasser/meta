@@ -62,8 +62,89 @@ Source: decodeclaude.com reverse engineering + docs bundle.
 5. Plan state
 6. Hook outputs
 
+### "Plan & Clear" as compaction alternative (product-native + community-validated):
+
+Claude Code has a **native "clear context and execute plan (.md)"** option that appears at context limits. This is the product-validated version of the pattern: save a structured plan to a .md file, wipe the context window entirely, then execute from the clean plan file. No lossy summarization — the plan IS the state.
+
+This is distinct from the other context-limit option ("summarize and continue") which is auto-compaction — lossy by definition.
+
+**Three variants, worst to best:**
+
+1. **Auto-compaction** ("summarize and continue") — the compaction algorithm decides what survives. Lossy, opaque, model-dependent. Community consensus: "error-prone and not well-optimized."
+2. **Manual Document & Clear** — you tell Claude what to write to a handoff doc, then `/clear`. You control what survives. Community workaround.
+3. **Native Plan & Clear** ("clear context and execute plan (.md)") — Claude writes a structured plan to .md, context clears, execution resumes from plan file. Product-native. Anthropic validated this as the right pattern by building it in.
+
+**Why Plan & Clear beats compaction:** Compaction is lossy summarization (confirmed by RLM analysis, arXiv:2512.24601 — "never summarize, delegate instead"). Plan & Clear preserves structured intent, not a degraded summary. The plan file is also inspectable, editable, and version-controllable — you can read it, fix it, or reject it before execution resumes.
+
+**Practical implication:** When context gets heavy, prefer the "clear context and execute plan" option over "summarize and continue." The plan file becomes a checkpoint you can audit.
+
+[SOURCE: Claude Code native UI, blog.sshh.io, ykdojo/claude-code-tips, sankalp.bearblog.dev]
+
 ### Key insight (hyperdev.matsuoka.com):
 Recent Claude Code performance improvements may come from **reserving more free context for reasoning** rather than better models. When Claude Code reported 10% remaining, independent measurement showed 36% free. The "completion buffer" prevents disruptive mid-operation compaction.
+
+## Community-Validated Patterns (Feb 2026 Reddit/Blog Sweep)
+
+Sources: [Shrivu Shankar](https://blog.sshh.io/p/how-i-use-every-claude-code-feature), [Sankalp](https://sankalp.bearblog.dev/my-experience-with-claude-code-20-and-how-to-get-better-at-using-coding-agents/), [ykdojo/claude-code-tips](https://github.com/ykdojo/claude-code-tips), [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code), r/ClaudeAI sweep.
+
+### MCP Design: Data Gateways, Not API Mirrors
+Abandon bloated MCPs that mirror REST endpoints. Each MCP should expose 1-2 high-level tools (raw data dump), not 15 CRUD operations. Let agents script against the data.
+
+**Rule of thumb:**
+- Stateful environments (Playwright, browsers, databases) → MCP
+- Stateless integrations (Jira, AWS, GitHub, git) → CLI tools
+
+This aligns with the MCP tool description study (arXiv:2602.14878): poor descriptions degrade agent performance. Fewer, well-described tools > many poorly-described ones. [SOURCE: blog.sshh.io]
+
+### Parallel Bash Over Multi-Agent Orchestration
+For large refactors, write bash scripts calling `claude -p "in /pathA change all refs from foo to bar"` in parallel. More scalable and controllable than a single agent managing dozens of subtasks or multi-agent orchestration.
+
+**Why this works:** Google scaling study (arXiv:2512.08296) shows multi-agent improves parallelizable tasks +81%. Parallel bash IS parallelization — without coordination overhead, error amplification, or context sharing. Each instance gets a clean context window. [SOURCE: blog.sshh.io]
+
+### GHA Logs → Meta-Analysis Loop
+Claude Code in GitHub Actions returns full agent logs. Mine them for failure patterns:
+```bash
+query-claude-gha-logs --since 5d | claude -p "find common mistakes and suggest CLAUDE.md fixes"
+```
+This implements our regret tracking concept (agent-failure-modes.md) architecturally — measuring corrections from production data instead of manually cataloging failures. [SOURCE: blog.sshh.io]
+
+### Token Budgeting in CLAUDE.md
+Treat CLAUDE.md like ad space. Assign max token counts per tool's documentation. If you can't explain a tool concisely, it isn't ready for the monorepo. Only tools used by 30%+ of engineers warrant core-file inclusion; everything else lives in skills or external docs referenced with "For X usage, see path/to/docs.md."
+
+Reference implementation: 13KB CLAUDE.md for a team consuming billions of tokens/month. [SOURCE: blog.sshh.io]
+
+### Tool Outputs Bloat Context Faster Than Tool Calls
+Each search, file read, and edit produces output that stays in context. Agents "token guzzle" from accumulated outputs, not from asking questions. This is the primary mechanism behind subagent effectiveness — 50 file reads stay in the subagent's context; only a 1-2K summary enters yours.
+
+**Practical implication:** Deploy subagents earlier than feels necessary. The exploration cost in the main window is the real expense, not the subagent invocation overhead. [SOURCE: sankalp.bearblog.dev]
+
+### System Reminders as Recitation Strategy
+Updating todo.md repeatedly refreshes goals into the model's recent attention window. This combats lost-in-the-middle effects in long contexts. Adapted from Manus's technique.
+
+This is the recitation strategy from Du et al. (EMNLP 2025, arXiv:2510.05381) applied to context management — they measured +4% on RULER from prompting models to recite retrieved evidence before answering. Training-free, model-agnostic. [SOURCE: sankalp.bearblog.dev]
+
+### Anti-Patterns Confirmed by Community
+
+**`@`-mentioning entire files in CLAUDE.md:** Embedding full docs bloats context on every run. Instead: pitch the agent on WHEN to read external files. "For X usage or Y error, see path/to/docs.md for troubleshooting." [SOURCE: blog.sshh.io]
+
+**Negative-only constraints:** "Never use --foo-bar" makes the model fixate on that flag. Always provide alternatives alongside prohibitions. [SOURCE: blog.sshh.io]
+
+**Over-relying on auto-compaction:** `/compact` is "opaque, error-prone, and not well-optimized." Explicit `/clear` + "Document & Clear" (dump progress to markdown, restart fresh) is more trustworthy. Aligns with RLM's "never summarize" finding (arXiv:2512.24601). [SOURCE: blog.sshh.io, ykdojo]
+
+**Custom subagents for everything:** Shrivu argues against custom subagents because they "gatekeep context" and force rigid workflows. Prefers generic `Task(...)` clones with full CLAUDE.md access, letting the agent decide when and how to delegate. This aligns with "simpler beats complex under stress" (ReliabilityBench). [SOURCE: blog.sshh.io]
+
+### Notable Community Tools (Feb 2026)
+
+| Tool | What it does | Why it matters |
+|------|-------------|----------------|
+| **claude-esp** | Streams hidden Claude output (thinking, tool calls, subagents) to separate terminal | Real-time debugging of agent reasoning |
+| **Dippy** | AST-parses bash commands to auto-approve safe ones, prompts for destructive | Solves permission fatigue without sacrificing safety |
+| **recall** | Full-text search across all Claude Code sessions with terminal UI | Better than basic `/resume` for finding past work |
+| **Trail of Bits Security Skills** | CodeQL/Semgrep via skills for code auditing | Professional security analysis in agent workflow |
+| **Ralph for Claude Code** | Autonomous loop framework with circuit breakers | Prevents infinite execution cycles |
+| **cc-tools** | High-performance Go linting, testing, statusline generation | Minimal overhead tooling |
+
+---
 
 ## Hook System
 
@@ -77,6 +158,9 @@ Recent Claude Code performance improvements may come from **reserving more free 
 - `Notification`: On events like context window warnings.
 - `Stop`: When Claude thinks it's done. Exit 2 = "no you're not, keep going."
 - `SubagentStop`: When subagent completes.
+
+### Hooks at commit-time, not write-time (Shrivu Shankar)
+Blocking agents mid-plan with PreToolUse hooks "confuses or even frustrates" them. Instead, hook `git commit` with validation that checks `/tmp/agent-pre-commit-pass` files. This enforces state validation at completion milestones rather than disrupting reasoning mid-flow. Matches ReliabilityBench finding: simpler beats complex under stress. [SOURCE: blog.sshh.io]
 
 ### Non-obvious patterns (Marco Patzelt, Feb 2026):
 
@@ -165,6 +249,46 @@ Most sophisticated solo-developer setup found:
 - **Deterministic port allocation**: `PORT = 3000 + (worktree * 10) + app_slot` for 8 concurrent worktrees.
 - **MCP Tool Search as lazy loading**: Instead of all MCP schemas upfront, `ToolSearch({ query: 'linear issues' })` loads tools on-demand.
 
+## Plugins (Evaluated 2026-02-27)
+
+**GA since Claude Code 1.0.33 (Oct 2025).** 9,000+ plugins in marketplace as of Feb 2026.
+
+### What they are
+Distribution format that bundles skills + hooks + MCP servers + agents + LSP servers into a shareable, installable package. Manifest at `.claude-plugin/plugin.json`. Install via marketplace or `--plugin-dir`.
+
+### What they solve
+Team/community distribution. One `claude plugin install` replaces manual setup of skills, hooks, and MCP configs. Versioned releases, namespaced skills (`/plugin:skill`), marketplace discovery.
+
+### What they DON'T support
+- **No rules equivalent.** `.claude/rules/*.md` with conditional path-scoped loading has no plugin analog. This is a core part of our intel (10 rules files) and selve (6 rules files) setups.
+- **No non-namespaced skills.** All plugin skills become `/plugin-name:skill-name`. Can't opt out.
+- **No project-specific MCP config overrides.** A plugin's `.mcp.json` is static — can't point DuckDB at different databases per project.
+
+### Assessment: NOT worth it for our setup
+
+**Why it doesn't fit:**
+1. Single developer, not a team. Symlinks already distribute to ourselves.
+2. Namespacing breaks muscle memory (`/researcher` → `/alien-tools:researcher`). Zero conflict risk when we control all names.
+3. Rules (conditional path-scoped loading) can't be pluginized. This is our most valuable extension point.
+4. Hooks are project-specific by nature (intel cost gates ≠ selve quality gates ≠ anki permission whitelist).
+5. MCP servers need project-specific config (DuckDB → Medicaid views, Selve MCP → personal knowledge graph).
+6. Migration cost: 16+ skills, multiple hook/MCP configs to restructure.
+
+**Where plugins WOULD make sense (not us, not now):**
+- Publishing `researcher` / `epistemics` / `scientific-drawing` for community use
+- Team onboarding (share your full setup with a collaborator)
+- Exa MCP starter kit (if configuring it in 6 projects became painful — it isn't)
+
+**What would change this calculus:**
+- If plugins gained rules support (conditional loading by path)
+- If plugins supported non-namespaced skills
+- If we started collaborating with others on intel/selve
+- If we needed to onboard someone to our tooling
+
+**Current architecture (symlinks + per-project config) is better suited to a single-developer, heterogeneous project setup.**
+
+[SOURCE: code.claude.com/docs/en/plugins, anthropic.com/news/claude-code-plugins (Oct 2025), morphllm.com/claude-code-plugins (Feb 2026)]
+
 ## Design Principles Summary
 
 1. **Context is your scarcest resource.** Every token in the window competes with reasoning capacity. Minimize always-loaded content.
@@ -172,7 +296,7 @@ Most sophisticated solo-developer setup found:
 3. **Hooks are free.** They run outside the model. Use them for deterministic enforcement (formatting, security, workflow gates).
 4. **Subagents protect the main window.** Exploration-heavy tasks should be delegated early. The summary is cheaper than the exploration.
 5. **Git is the memory system.** Not databases, not vector stores. Files + commits + diffs. Anthropic's own long-running agents use this pattern.
-6. **Compaction is lossy.** Design around it: backup transcripts, use session state files, keep critical context in files the model will re-read.
+6. **Compaction is lossy. Plan & Clear is the escape hatch.** When Claude offers "clear context and execute plan (.md)" at context limits, prefer it over "summarize and continue." The plan file is a checkpoint you can audit and edit. Auto-compaction is opaque. Backup transcripts via PreCompact hooks regardless.
 7. **SkillsBench: human-authored skills work, self-generated don't.** Invest in writing good skills. Don't let Claude write its own.
 8. **Two-agent architecture for multi-session work.** Initializer writes plan + progress file. Worker reads and continues. No state beyond files.
 9. **Anti-rationalization is a real failure mode.** Stop hooks that evaluate completion claims catch premature "done" declarations.
