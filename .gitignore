@@ -31,5 +31,6 @@ __pycache__/
 # ---- Secrets ----
 .env
 .env.*
+.mcp.json
 # The '!' is escaped to prevent issues if script is sourced in zsh
 \!.env.example
