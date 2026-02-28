@@ -1,7 +1,7 @@
 # Autonomous Agent Architecture for Long-Running Intelligence Work
 
 **Date:** 2026-02-27
-**Context:** Design for a single Claude Code agent that can work productively for an entire day across the `intel` (adversarial intelligence) and `self` (genomics/health) projects, with inspectable evolution, no mode collapse, and continuous self-improvement.
+**Context:** Design for a single Claude Code agent that can work productively for an entire day across the `intel` (adversarial intelligence) and `genomics` (WGS pipeline/health) projects, with inspectable evolution, no mode collapse, and continuous self-improvement.
 
 ---
 
@@ -37,7 +37,7 @@ Current workflow: human starts Claude Code session, manually selects what to wor
 - Rotates across work types without human steering
 - Maintains inspectable log reviewable in 5 minutes
 - Improves its own tooling, knowledge base, and detection capability
-- Handles both `intel` (investments, fraud) and `self` (genomics, health optimization)
+- Handles both `intel` (investments, fraud) and `genomics` (WGS pipeline, health optimization)
 - Human reviews output once/day, approves/rejects, provides new orientation
 
 ---
@@ -136,7 +136,7 @@ These are the recurring workflows identified from 40+ intel project sessions. Ea
 
 ### Cross-Project Application
 
-The same 7 loops apply to the `self` (genomics) project:
+The same 7 loops apply to the `genomics` project (`~/Projects/genomics/`):
 - **Loop 1:** Download new ClinVar releases, PharmGKB updates, 23andMe reprocessing
 - **Loop 2:** Gene/variant entity files with coverage dates (last ClinVar check, last literature review)
 - **Loop 3:** "Why do I have this phenotype?" as investigation; ACH for competing genetic explanations
