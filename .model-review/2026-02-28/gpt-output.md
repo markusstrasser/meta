@@ -1,306 +1,283 @@
 ℹ Starting chat {"provider": "openai", "model": "gpt-5.2", "stream": true, "reasoning_effort": "high"}
 ## 1. Logical Inconsistencies
 
-1) **Gemini temperature guidance conflicts**
-- `model-review` (Review Mode) instructs: *“Lower temperature for Gemini (`-t 0.3`) — more deterministic, stern”*
-- `model-guide` instructs: *“Keep temperature at 1.0 — lowering causes looping and degraded reasoning”*
-- These cannot both be true as a general rule. At minimum, temperature guidance must be **task-conditional** (e.g., “for mechanical audits lower; for generative synthesis keep 1.0”), and the skill should encode **the actual observed behavior in this repo**, not generic best practice.
+1) **“CAG when corpus ≤ 200K tokens” is not actually implementable from the proposed router**
+- Router `classify_query(query)` only inspects the query string, but the strategy table says CAG depends on *corpus size* (≤200K tokens). That requires inspecting candidate documents (or at least index stats) *after* index selection.
+- Formal contradiction: decision rule references a variable (corpus tokens) not available to the classifier.
 
-2) **“Constitutional check” promises file discovery paths that may not exist**
-- `model-review` pre-flight uses: `find . ~/Projects/intel/docs ...`
-- The rest of the skill assumes `CONSTITUTION.md`/`GOALS.md` are discoverable and inject-able.
-- If the repo layout differs, the skill’s “anchoring” silently fails, violating the intent of Principle #7 (honest provenance) because the review output will *look* constitution-anchored but isn’t.
+2) **`ask` says “Sends all matching content” but “matching” is undefined**
+- What constitutes “matching” in `ask(question, indexes, sources)`?
+  - If it means “all documents in selected indexes,” that can exceed 1M context and is cost/latency explosive.
+  - If it means “documents matching the question,” then `ask` implicitly requires a retrieval step (i.e., a `search` call + top_k selection), which is not specified.
+- Unstated assumption: there exists an unambiguous, bounded mapping from question → included entries without retrieval parameters (top_k, threshold, token budget).
 
-3) **Source-grade principle vs benchmark-number assertions**
-- `model-guide` includes many benchmark numbers (e.g., “SimpleQA 72%”, “ARC-AGI-2 77.1%”, prices) with **no attached source grades**.
-- Under Principle #3 (“Every Claim Sourced and Graded”), those are effectively **unsourced** and should be treated as **LLM outputs [F3]** unless verified.
-- This is a direct inconsistency: the library is prescribing strict epistemics, while embedding ungraded factual claims in guidance.
+3) **Result score comparability across indexes is undefined**
+- The plan merges results across indexes “by default” and returns a single ranked list.
+- If different indexes use different embedding models, normalization, BM25 configs, or rerankers, raw similarity scores are not comparable. A global sort by `score` is formally invalid unless scores are calibrated onto a common scale.
+- Consequence: merged ranking can be arbitrarily wrong even if each per-index ranking is correct.
 
-4) **Provenance scheme mismatch across skills**
-- Constitution mandates NATO Admiralty grades + `[DATA]` and says “LLM outputs are [F3] until verified.”
-- `researcher` uses a different tag set (`[SOURCE:]`, `[TRAINING-DATA]`, `[INFERENCE]`, etc.) and explicitly says “don’t mix with Admiralty when OSINT is active.”
-- Net effect: the skill library has **two competing provenance ontologies** with no deterministic rule for which one wins in mixed workflows (investment research can be OSINT-like, and vice versa).
+4) **Deduplication across indexes is underspecified**
+- `search_all` says “merge and deduplicate results,” but there is no stable dedupe key:
+  - same content may appear with different IDs across indexes,
+  - same document may have multiple chunks with near-identical text,
+  - “source” may not be unique.
+- Without a defined equivalence relation (e.g., normalized URL, SHA256 of canonical text, doc_id+chunk_id), dedupe becomes heuristic and may destroy recall or inflate duplicates.
 
-5) **“Fact-check outputs (MANDATORY)” is not enforceable**
-- `model-review` says fact-checking is mandatory, but provides no hook/test that fails the workflow if you don’t verify.
-- This conflicts with the governance claim “Instructions alone = 0% reliable; prefer hooks/tests.” The skill is internally acknowledging that instruction-only is weak, then relying on instruction-only for the most important safeguard.
+5) **Index format assumption: “Scan index_dir for .json files; each file = one index”**
+- This assumes emb indexes are single `.json` artifacts. Many embedding stores are multi-file (FAISS, SQLite, parquet, etc.). If emb uses anything other than `.json`, discovery fails.
+- Unstated assumption: emb’s on-disk representation is (and will remain) compatible with “one index = one json file.”
 
-6) **Timeout advice partially conflicts with recommended invocation**
-- `llmx-guide` emphasizes streaming + not overriding auto timeout scaling.
-- `model-review` uses both streaming and non-streaming variants; for Gemini it uses `--no-stream` with fixed `--timeout 300`.
-- That may be fine for Gemini, but it violates the “avoid idle kills” lesson that is framed as general. If the intent is “GPT requires stream; Gemini can be no-stream,” it should be explicit.
+6) **Cache invalidation via mtime is not sufficient under common rebuild patterns**
+- If `emb embed` writes a temp file then renames, mtime changes are fine; if it writes in-place and updates multiple shard files, watching only one `.json` mtime can miss changes.
+- Race condition: a request can load a partially-written index if rebuild is in progress (needs atomic swap or file lock / “ready marker”).
 
-7) **Goal “portfolio is the scorecard” is largely unreferenced by the skills**
-- None of the four skills has a required output field tying results to: *“What should I buy/sell/hold?”* or *portfolio impact*.
-- The previous synthesis mentions adding portfolio impact to daily logs, but the skills themselves do not structurally enforce it.
+7) **Router edge cases likely to fail (systematic misclassification)**
+- **Quoted terms + synthesis intent**: `compare "X" vs "Y"` → BM25 by rule order, but intent is synthesis; wrong.
+- **IDs inside conceptual questions**: “Why did contract W52P1J-… matter?” → BM25 though semantic retrieval may be better.
+- **Short conceptual queries**: “adverse events” (2 words) → hybrid though dense might be better.
+- **Long exact-match queries** without quotes: “10-Q filed 2023-11-07 revenue recognition policy” → dense by default though BM25 may be superior.
+- **Synthesis without keywords**: “What changed between these two memos?” → may route to dense/hybrid, not CAG.
+
+8) **Tool output schema conflicts with stated workflow**
+- `search` returns `text` (truncated) plus `id`; `get_content` returns full text. But truncation length (“300 chars”) is specified in prose, not in schema—clients can’t rely on it.
+- For “honest about provenance,” results should include `index`, `doc_id`, `chunk_id`, `source_uri`, `created_at/observed_at`; plan mentions only some informally.
+
+9) **Cost claims are too precise without a measurement plan**
+- “EMB ~$0.0001/query” and “CAG ~$0.01/query” are plausible order-of-magnitude, but they’re not tied to token counts, caching hit rate, or rerank model choice. As written, they’re not falsifiable and may be misleading.
 
 ---
 
 ## 2. Cost-Benefit Analysis
 
-All numbers below are **order-of-magnitude estimates** (token counts depend heavily on context size and outputs). Prices used are those embedded in `model-guide` (Gemini 3.1 Pro $2/$12 per MTok in/out; GPT‑5.2 $1.75/$14; Claude prices not used here).
+Assumptions (make these explicit to evaluate): single developer, Python familiarity, emb is importable, MCP is already used in your workflow, and you’ll issue **~30–100 local searches/day** once integrated.
 
-### A) `model-review`
-**Typical use pattern in the skill**
-- Gemini 3.1 Pro context: 80k–150k tokens in; output maybe 6k–20k out (often capped by max output).
-- GPT‑5.2 context: 15k–40k tokens in; output 5k–15k out (review mode).
+### Tool 1: `search`
+- **Effort (impl + tests)**: ~6–12 hours if emb API is clean; 12–24 hours if you must adapt index IO / scoring / chunk formats.
+- **Usage frequency**: Very high (core primitive): expected 20–100 calls/day once habitual.
+- **Value delivered**:
+  - Primary: makes emb usable from any MCP-enabled agent without shelling out; reduces friction (context switch + manual CLI calls).
+  - Secondary: routing saves manual choice overhead.
+- **ROI vs emb CLI**:
+  - If CLI call + parsing costs you even **20 seconds** each and you do **40/day**, that’s ~13 minutes/day. At 5 days/week, ~1.1 hours/week. Payback in **1–2 weeks** for a 10–20 hour build.
+  - Biggest risk: merged ranking incorrect due to uncalibrated scores across indexes (can *increase* error rate unless fixed).
 
-**Cost estimate (per invocation, 1 Gemini + 1 GPT)**
-- Gemini:  
-  - In: 120k → 0.12 MTok × $2 ≈ **$0.24**  
-  - Out: 12k → 0.012 MTok × $12 ≈ **$0.14**  
-  - Subtotal ≈ **$0.38**
-- GPT‑5.2:  
-  - In: 30k → 0.03 MTok × $1.75 ≈ **$0.05**  
-  - Out: 10k → 0.01 MTok × $14 ≈ **$0.14**  
-  - Subtotal ≈ **$0.19**
-- Total ≈ **$0.6 per review** (can be $0.3–$2 depending on context/output caps).
+### Tool 2: `get_content`
+- **Effort**: ~2–6 hours (depends on how emb stores full text vs chunks).
+- **Usage frequency**: High (paired with search): 5–30 calls/day.
+- **Value delivered**:
+  - Cuts token waste and latency by avoiding fetching full texts for all hits.
+  - Encourages “retrieve then read” discipline (supports error correction).
+- **ROI vs embedding full text into search output**:
+  - If average full text is 5–50 KB and top_k=10, always returning full text can add 50–500 KB per call and slow the agent. Separation is justified.
 
-**Expected value**
-- High when reviewing **trade-influencing logic, capital allocation rules, data joins, or anything that can create expensive errors**.
-- Low when used on low-stakes docs because the bottleneck becomes verification (human time), not model output.
+### Tool 3: `indexes`
+- **Effort**: ~2–4 hours if metadata exists; 6–10 hours if you must infer stats by scanning indexes.
+- **Usage frequency**: Medium-low (discovery/debug): maybe 1–5 calls/day initially, then 1–5/week.
+- **Value delivered**:
+  - Prevents “searching the wrong corpus” errors.
+  - Enables index selection (critical if merging across indexes is confusing).
+- **ROI vs “just know the index names”**:
+  - Small but positive; also helps testing and monitoring.
 
-**ROI risk**
-- Overhead grows nonlinearly if you don’t aggressively constrain context bundles. The skill *suggests* this, but doesn’t enforce it.
+### Tool 4: `ask` (CAG)
+- **Effort**: ~8–20 hours (litellm integration, token budgeting, prompt formatting, safety, tests, caching behavior).
+- **Usage frequency**: Low (specialized): likely 0–5 calls/day.
+- **Value delivered**:
+  - Best when you need cross-document synthesis (timelines, contradiction spotting).
+  - But it overlaps with papers-mcp’s CAG for papers; incremental value is mainly for *non-paper* corpora (notes, git, transcripts).
+- **ROI vs “agent does search + manual synthesis”**:
+  - If used rarely, it may not repay the complexity early.
+  - Given your own “fast feedback over slow feedback” and “instructions alone = 0% reliable,” CAG adds a slow, probabilistic layer that is harder to score unless you build evals.
 
-### B) `model-guide`
-**Cost**
-- Near-zero to consult (it’s static text).
-**Expected value**
-- Moderate: prevents misrouting tasks to hallucination-prone models; saves time/cost.
-**Major ROI problem**
-- It embeds many unsourced numeric claims; if wrong, it can cause systematic misrouting.
-
-### C) `llmx-guide`
-**Cost**
-- Near-zero to consult.
-**Expected value**
-- High: prevents common “timeouts / wrong model name” failures that waste full runs. This is “fast feedback over slow feedback” aligned: fewer dead runs.
-
-### D) `researcher`
-**Cost**
-- Highly variable; “Deep tier” can easily run **hundreds of thousands of tokens** plus web/paper fetch overhead.
-- If it triggers multiple paper fetches and long-context synthesis, expect **$1–$10** equivalent compute (plus your time), depending on tool pricing.
-
-**Expected value**
-- High for “what is true?” questions with durable value.
-- Potentially low for alpha if it drifts into slow-feedback investigation without tying back to market-gradeable predictions.
-
-**Over-/under-engineering diagnosis**
-- **Over-engineered (relative to value):** `researcher` for time-sensitive market signals unless it is explicitly constrained to produce short-horizon, market-testable predictions.  
-- **Under-invested:** instrumentation + enforcement hooks across all skills (verification gates, provenance enforcement, portfolio linkage).
+**Bottom line**: Building MCP wrappers for **`search` + `get_content` + `indexes`** is strongly worth it. **`ask`** is only worth it in v1 if (a) you have a concrete non-paper synthesis workflow you’ll use weekly and (b) you implement strict token budgets + evaluation.
 
 ---
 
 ## 3. Testable Predictions
 
-Define a lightweight measurement plan: sample size ≥ 30 items per test, pre-registered success criteria, and log outcomes.
+Convert key claims into falsifiable metrics with acceptance thresholds:
 
-1) **Cross-model review improves error-catch rate**
-- Prediction: For comparable documents/code changes, `model-review` finds ≥ **30% more unique, verified issues** than single-model review.  
-- Measure: count verified issues found (deduped), per 10 reviews. Success if Δ ≥ 30% with p-value threshold or simple binomial CI excluding 0.
+1) **Latency claim**
+- Prediction: `search(strategy=hybrid, top_k=10, rerank=False)` returns in **p50 ≤ 80ms**, **p95 ≤ 200ms** on your laptop for a warmed index.
+- Test: 1,000 queries sampled from a query log; measure end-to-end MCP tool latency.
 
-2) **Model agreement without verification is weak**
-- Prediction: Among “both models agree” claims that are **not** verified against code/data, at least **10–25%** are wrong (hallucinated specifics, misreadings).  
-- Measure: randomly audit 50 “agree” claims; compute error rate.
+2) **Cost claim**
+- Prediction: Average marginal cost per `search` call is **$0** external and CPU time ≤ 250ms p95 (rerank off).
+- Prediction: `ask` average Gemini cost is within **±2×** of estimate when measured as `$ per 1,000 calls` at a fixed token budget (see below).
+- Test: instrument tokens in/out and billable units; report mean/median.
 
-3) **Verification gate reduces adoption of wrong recommendations**
-- Prediction: Adding a required “Verified How” field + blocking merge/commit when absent reduces wrong-adoption rate by **≥50%**.  
-- Measure: before/after audit of adopted recommendations later found wrong.
+3) **Router accuracy**
+- Prediction: Router’s `auto` strategy matches the strategy chosen by a human labeler in **≥80%** of cases on a blinded set of **200** historical queries.
+- Test: collect queries, have you label ideal strategy (bm25/dense/hybrid/cag), compute accuracy + confusion matrix.
 
-4) **Gemini temperature rule is domain-dependent**
-- Prediction: On your repo’s typical long-context review bundles, Gemini at temp=1.0 produces ≥ **20% more instruction-following failures** OR ≥ **20% more irrelevant content** than temp=0.3 (or vice versa).  
-- Measure: score outputs for format compliance + relevance; choose winner empirically.
+4) **Router benefit (not just accuracy)**
+- Prediction: Using `strategy=auto` improves **MRR@10** (mean reciprocal rank) by **≥10%** vs always-dense, on a benchmark of **100** queries with known relevant documents.
+- Test: build a small gold set (query → relevant doc IDs) and evaluate ranking metrics.
 
-5) **Researcher disconfirmation phase changes conclusions**
-- Prediction: In ≥ **25%** of Standard/Deep researcher runs, explicit disconfirmation search leads to a materially different conclusion (direction flip, confidence downgrade, or identified boundary condition).  
-- Measure: log “conclusion changed after disconfirmation: yes/no.”
+5) **Merged-index ranking validity**
+- Prediction: With your chosen merge method, merged search across N indexes has **nDCG@10 within 5%** of an oracle that searches each index and picks the best index per query.
+- Test: evaluate per query across indexes; compare.
 
-6) **Portfolio linkage increases actionable outputs**
-- Prediction: If every run must output “portfolio impact / tradeable implication,” the fraction of sessions producing a concrete, time-bounded prediction increases by **≥30%**.  
-- Measure: before/after proportion with explicit predictions + deadlines.
+6) **Dedup correctness**
+- Prediction: Duplicate rate in top-20 results is **≤10%** (by doc identity) on 100 sampled queries.
+- Test: define doc identity (URI/SHA), compute duplicates.
 
-7) **Timeout guidance reduces failed llmx calls**
-- Prediction: Adopting `llmx-guide` timeout/streaming defaults reduces failed GPT calls by **≥70%**.  
-- Measure: tool error logs before/after.
+7) **Index invalidation correctness**
+- Prediction: After rebuilding an index file, the next `search` observes new content within **≤2 seconds** without restarting the server, and never loads a partially written index.
+- Test: rebuild in a loop while querying; assert atomicity (no exceptions, and results switch cleanly).
 
-8) **Source-grading enforcement reduces unsourced factual errors**
-- Prediction: If benchmark/pricing numbers in `model-guide` must carry grades and citations, the rate of later-discovered numeric inaccuracies falls by **≥80%**.  
-- Measure: audit numeric claims quarterly; track corrections.
+8) **CAG usefulness (if included)**
+- Prediction: For a fixed set of 50 synthesis questions, `ask` reduces your “time to answer” by **≥30%** vs `search+manual`, without increasing factual error rate above **5%** (as judged by spot-check against source excerpts).
+- Test: timed trials + factuality scoring.
 
 ---
 
 ## 4. Constitutional Alignment (Quantified)
 
-Scores reflect **coverage across the four skills** (not the whole repo). “Coverage” = how well the skill’s design enforces/embeds the principle.
+Scoring: **coverage** = how much the design *architecturally enforces* the principle (not whether it gestures at it). “Suggested fixes” are concrete enforcement mechanisms.
 
-### Principles (CONSTITUTION.md)
+1) **Autonomous Decision Test** — **70%**
+- Coverage: Clear focus on making retrieval faster/better-informed.
+- Gap: No metric loop tying tool behavior to improved decisions (no retrieval eval harness by default).
+- Fix: add built-in logging + offline eval script (MRR/nDCG, latency) and make “improve these metrics” the acceptance gate.
 
-1) **Autonomous Decision Test** — **45%**
-- Strengths: `model-review` aims to improve decisions; `llmx-guide` reduces wasted cycles.
-- Gaps: No explicit step: “does this make the next trade decision better-informed/faster/more honest?”; no “stop conditions” for low-value reviews.
-- Fix: Add a required preface field: *Decision improved? (Y/N) Which decision? Expected time-to-feedback?*
-
-2) **Skeptical but Fair** — **60%**
-- Strengths: researcher has disconfirmation; model-review asks “what’s wrong.”
-- Gaps: Not much explicit base-rate framing; limited “don’t assume wrongdoing” enforcement.
-- Fix: Add “base rate / alternative explanations” prompt blocks in `researcher` for investigations.
+2) **Skeptical but Fair** — **55%**
+- Coverage: Neutral; retrieval is not biased by intent.
+- Gap: CAG can amplify spurious synthesis; no built-in counterevidence retrieval mode.
+- Fix: add `search(mode="pros_and_cons")` is scope creep; better: add a simple option `diversity=True` to increase result diversity and reduce cherry-picking; measure contradiction rate.
 
 3) **Every Claim Sourced and Graded** — **35%**
-- Strengths: `researcher` is strong on provenance tags.
-- Gaps: `model-guide` contains many ungraded numeric assertions; `model-review` outputs are not required to be graded claim-by-claim.
-- Fix: (i) mark all static benchmark numbers as `[UNVERIFIED]/[TRAINING-DATA]` until citations added, (ii) require per-claim grading in review syntheses (at least A/B/C tiers).
+- Coverage: Mentions `source` in results.
+- Gaps:
+  - No source grading field in schema (`grade` missing).
+  - No guarantee that returned text is tied to a stable primary source URI.
+- Fix: extend result schema: `{source_uri, source_type, source_grade, observed_at, index, doc_id, chunk_id}` and enforce non-null for entity-file-related indexes.
 
-4) **Quantify Before Narrating** — **55%**
-- Strengths: model-review includes cost and token budgeting guidance; llmx-guide is quantitative about timeouts.
-- Gaps: Little dollar-risk quantification tied to portfolio; no probabilistic beliefs/Brier framing in these skills.
-- Fix: Add required “probability + expected value + what would change my mind” outputs for trade-relevant runs.
+4) **Quantify Before Narrating** — **40%**
+- Coverage: Costs/latency are mentioned.
+- Gap: No quantitative retrieval quality targets; no budgets (token caps for CAG, timeouts).
+- Fix: enforce token budget in `ask` (hard cap) + return `cost_estimate` and `tokens_used` in responses.
 
-5) **Fast Feedback Over Slow Feedback** — **50%**
-- Strengths: llmx-guide + model-review emphasize efficiency; markets referenced in constitution but not operationalized.
-- Gaps: researcher can drift into slow-feedback investigations without forcing market-testable outputs.
-- Fix: Researcher add-on: “What resolves in ≤90 days?” and require at least one short-horizon prediction.
+5) **Fast Feedback Over Slow Feedback** — **75%**
+- Coverage: Prefers local search; heuristics to avoid LLM router; separate `ask` to make cost explicit.
+- Gap: Without eval/telemetry, you won’t know if “fast” is also “correct.”
+- Fix: add automatic latency + success metrics logging (e.g., whether user calls `get_content` after `search`, proxying usefulness).
 
-6) **The Join Is the Moat** — **20%**
-- These skills barely mention entity graph joins/resolution.
-- Fix: Add a “data join opportunities / entities to resolve” section to researcher/model-review outputs when relevant.
+6) **The Join Is the Moat** — **60%**
+- Coverage: Single search surface over multiple indexes supports cross-domain reuse.
+- Gap: No entity-aware join layer (IDs, canonical entities) and merged ranking may be invalid.
+- Fix: introduce a minimal canonical document identity across indexes (URI/SHA) and optional “entity_id” field if indexes support it. This creates compounding join value.
 
-7) **Honest About Provenance** — **65%**
-- Strengths: researcher’s explicit tags; model-review’s “verify outputs” emphasis.
-- Gaps: No enforcement; `model-guide` mixes asserted facts with advice without provenance labels.
-- Fix: Enforce provenance labeling in static docs; add automated lint for “numbers without citations.”
+7) **Honest About Provenance** — **50%**
+- Coverage: Separation of retrieval (`search`) and synthesis (`ask`) helps.
+- Gap: `ask` output can blur what is quoted vs inferred unless you enforce citations.
+- Fix: require `ask` to return structured citations: answer + list of (doc_id, excerpt, offset). Reject responses without citations (architectural hook).
 
-8) **Use Every Signal Domain** — **25%**
-- Not addressed directly in these four skills.
-- Fix: Researcher: explicit cross-domain axis requirement is good; extend to investment signals list (FAERS/CFPB/contracts) for alignment with GOALS.
+8) **Use Every Signal Domain** — **65%**
+- Coverage: Index-agnostic; supports many corpora.
+- Gap: No mechanism to prioritize domains or ensure discoverability.
+- Fix: index metadata should include `domain`, `source_type`, and be queryable; then you can route/weight by domain.
 
-9) **Portfolio Is the Scorecard** — **15%**
-- Almost entirely absent in the skill designs.
-- Fix: Add required “portfolio impact” fields and link outputs to live positions/watchlist.
+9) **Portfolio Is the Scorecard** — **20%**
+- Coverage: Indirect only.
+- Gap: No linkage to trades, predictions, or decision outcomes.
+- Fix: log query→artifact→decision link IDs (even manually) so you can later correlate retrieval behavior with portfolio outcomes.
 
-10) **Compound, Don’t Start Over** — **55%**
-- Strengths: model-review persists artifacts in `.model-review/YYYY-MM-DD/`; researcher encourages corpus building.
-- Gaps: No canonical “lessons learned” ledger integration; no standardized ID linking across runs.
-- Fix: require unique issue IDs + append to an “error-correction ledger” file.
+10) **Compound, Don’t Start Over** — **70%**
+- Coverage: Index discovery + reload supports continuous updating; MCP reuse across projects compounds.
+- Gap: No versioning of index metadata; no changelog of index rebuilds.
+- Fix: keep a small `indexes_manifest.json` with build timestamps, source snapshots, embedding model version; include in `indexes()` output.
 
-11) **Falsify Before Recommending** — **70%**
-- Strengths: researcher disconfirmation; model-review fault-finding.
-- Gaps: Not tied to trade recommendation workflow; no ACH enforcement for >$10M leads in these skills.
-- Fix: Add a “trade-thesis falsification” template and a trigger condition.
+11) **Falsify Before Recommending** — **30%**
+- Coverage: Not addressed; retrieval can support falsification but no explicit affordance.
+- Fix: add a parameter `search(intent="disconfirm")` that (a) expands query with negations/counterterms via a deterministic ruleset or (b) retrieves diverse results; measure whether users retrieve counterevidence more often.
 
-### Goals (GOALS.md)
+**Autonomy boundaries / “Human-protected”** — **90%**
+- Coverage: MCP server only retrieves; no trade execution.
+- Gap: If `ask` is used to generate narrative, it may be mistakenly treated as “truth.” That’s a workflow risk, not an autonomy violation.
+- Fix: return explicit provenance + cost + uncertainty fields; enforce citation requirement.
 
-1) **Autonomous intelligence engine extracting alpha**  
-- Served by: `researcher` (data gathering), `model-review` (quality control).  
-- Neglected: explicit alpha-signal operationalization (FAERS/CFPB/contracts) is not built into these skills.
-
-2) **Investment research first; markets as calibration**  
-- Served: partially (model-review mentions market feedback conceptually).  
-- Neglected: no built-in prediction tracker/Brier integration in skills.
-
-3) **Target domain ($500M–$5B)**  
-- Not served directly by these skills.
-
-4) **Alpha strategies (FAERS/CFPB/contracts/governance/insider)**  
-- Not encoded; researcher’s cross-domain axes could support it but isn’t pointed at these.
-
-5) **Risk profile (no options/shorts/leverage; human executes)**  
-- Served indirectly: model-review’s outbox pattern mention appears in prior synthesis, but **not enforced** in these skill texts.
-
-6) **Success metrics (Brier < 0.2, prediction resolution, pipeline autonomy)**  
-- Neglected: none of the four skills requires Brier scoring, prediction logging, or resolution events.
+**“Instructions alone = 0% reliable” (governance meta-rule)** — **45%**
+- Coverage: Good instinct (heuristic router, separate tools).
+- Gap: Many requirements are only described in docstrings (“truncate to 300 chars,” “flag if corpus too large”) with no enforcement.
+- Fix: add schema validation + unit tests asserting truncation, max tokens, citation presence, and atomic index reload.
 
 ---
 
-## 5. Trust Calibration Math
+## 5. Answers to Open Questions
 
-The current trust table in `model-review` is directionally right (“verify against code” dominates), but **it is not calibrated** without base rates. Key issue: **model agreement is not independent**, so “both agree” is not strong evidence unless you measure correlation of errors.
+1) **Merge results across all indexes by default?**
+- Recommendation: **Default = search all, but do not produce a single global ranking unless you implement score calibration / rank fusion.**
+- Quant justification:
+  - If scores aren’t comparable, global sorting can reduce precision materially. A safe approach is **Reciprocal Rank Fusion (RRF)** on per-index ranks: robust, parameter-light.
+  - Implement RRF and report results grouped with an overall fused rank + per-index rank.
+- Success metric: merged-all nDCG@10 within **5–10%** of best-single-index oracle on a 100-query benchmark.
 
-### A minimal Bayesian model (per-claim)
-Let:
-- \(C\) = claim is correct.
-- \(A\) = Gemini says claim is true (or recommends X).
-- \(B\) = GPT says claim is true.
+2) **Router configurable per-index?**
+- Recommendation: **Yes, via index metadata hints**, but keep it minimal: `{preferred_strategies, default_strategy, supports_rerank, score_scale}`.
+- Quant justification:
+  - Hints reduce systematic error where corpus type dominates (e.g., git commits often benefit from BM25).
+  - Expect router accuracy gain of **~5–15 percentage points** on mixed-corpus queries (to be measured).
+- Test: stratified router evaluation by index type; require improvement vs global heuristics.
 
-If we (temporarily) assume conditional independence given correctness (often false, but a baseline):
-- \(P(A,B \mid C) = a_G a_{GPT}\)
-- \(P(A,B \mid \neg C) = (1-a_G)(1-a_{GPT})\)
+3) **Is CAG worth including in v1?**
+- Recommendation: **Defer CAG (`ask`) unless you can name ≥2 weekly workflows it will accelerate.**
+- Quant justification:
+  - Added complexity (litellm, token budgeting, citation enforcement) is ~8–20 hours plus ongoing maintenance.
+  - If usage is <20 calls/week, time saved must exceed build cost; at, say, 2 minutes saved/call → 40 min/week; payback ~3–6 weeks *if* quality holds. If usage is lower or error rate is higher, it’s negative EV.
+- If included: enforce hard token cap + citation schema; otherwise it will violate “fast feedback” and “provenance” in practice.
 
-Then:
-\[
-P(C \mid A,B)=\frac{P(C)a_G a_{GPT}}{P(C)a_G a_{GPT} + (1-P(C))(1-a_G)(1-a_{GPT})}
-\]
-
-Problem: you don’t know \(P(C)\) (base rate that a random model claim is correct in this domain) nor \(a_G, a_{GPT}\), and independence is violated (shared training data, similar failure modes).
-
-### Practical calibration approach (recommended)
-Treat each review as producing a set of **atomic claims** (e.g., “file X does Y”, “timeout should be Z”, “this flag exists”). For each claim, record:
-- model(s) asserting it
-- category (code, math, ops, market, factual)
-- verified? (Y/N)
-- outcome (correct/incorrect)
-
-After \(N\ge 200\) verified claims, you can estimate:
-- \(a_G\), \(a_{GPT}\) by category
-- correlation via empirical \(P(\text{both wrong} \mid \text{both agree})\)
-
-### Suggested interim priors (until you have data)
-These are **assumptions** to be replaced by measured rates:
-- For “specific code/paths/line numbers” without tools: single-model accuracy maybe **0.6–0.8**; correlated errors nontrivial.
-- For math derivations that can be checked: effectively near **1.0 once verified**.
-- For “system design advice”: correctness is not binary; evaluate via outcomes (cost reduction, fewer failures).
-
-### Revised trust mapping (operational)
-- **Verified against ground truth (code/data/primary source):** posterior ≈ **0.99** (Very high), regardless of model agreement.
-- **Unverified, both models agree:** treat as **hypothesis** with posterior maybe **0.75–0.9** depending on category *after you estimate it*; do **not** label “Very high” without measurement.
-- **Unverified, one model:** posterior maybe **0.55–0.75**; needs verification before adoption.
-
-Bottom line: the table should be reframed as **workflow actions** (“Adopt only if verified”) rather than pretending to be probabilistically calibrated.
+4) **Index directory convention (`~/embeddings/` vs wherever)**
+- Recommendation: **Do not force a convention; support multiple directories + explicit configuration.**
+- Quant justification:
+  - Forcing migration has one-time cost and risk of breaking existing pipelines.
+  - Supporting `SEARCH_INDEX_DIR` as a **colon-separated list** (`dir1:dir2`) yields near-zero marginal complexity and reduces user friction.
+- Metric: “time-to-first-successful-search” from clean setup ≤ 5 minutes (manual test).
 
 ---
 
-## 6. My Top 5 Recommendations
+## 6. My Top 5 Recommendations (different from the originals)
 
-1) **Add a verification ledger + enforce it (hook, not advice)**
-- (a) What: For `model-review` outputs, require an adjacent `claims.csv` (or JSON) with fields: `claim_id, claim_text, source_model, category, verification_method, verified_bool, result_bool, notes`. Block “adopt” status unless `verified_bool=1`.  
-- (b) Why (quant): If unverified “both agree” claims are wrong even 10% of the time, and each wrong adoption costs even 1–3 hours to unwind (or creates silent research debt), expected cost dominates compute savings. Verification gating targets the highest expected-loss failure mode.  
-- (c) Verify: After 30 reviews, measure (i) % adopted items verified, (ii) wrong-adoption rate, target **<2%** wrong adopted items.
+1) **Implement rank fusion (RRF) instead of score-sorting for multi-index search**
+- What: For each index, get top_k per-index results, then fuse with RRF: `score = Σ 1/(k0 + rank_i)` (k0 ~ 60).
+- Why (quant): Prevents invalid cross-index score comparisons; typically improves robustness with heterogeneous corpora. Expect measurable lift in nDCG@10 and fewer “obviously wrong” top hits.
+- Verify: On a 100-query gold set, merged-all nDCG@10 improves **≥10%** vs naive global score sort; duplicate rate in top-20 ≤10%.
 
-2) **Resolve the Gemini temperature contradiction empirically**
-- (a) What: Run an A/B test over the same 20 historical context bundles: Gemini temp=0.3 vs 1.0 (or whatever llmx actually supports), score format compliance + verified issue yield. Then codify the winner in `model-review`.  
-- (b) Why (quant): A 10% drop in instruction compliance on long reviews translates to rework and missed errors; it’s measurable and cheap to test (≈ a few dollars).  
-- (c) Verify: Predefine metrics: section compliance (0–6), # verified issues, hallucination rate per 10 claims.
+2) **Add structured provenance fields and enforce them with schema validation**
+- What: Results must include `{index, doc_id, chunk_id, source_uri, source_type, observed_at}`; optionally `{source_grade}` where available.
+- Why (quant): Reduces downstream “unsourced claim” risk and enables later audits; also enables dedupe and join.
+- Verify: Unit tests: 100% of returned results include required fields; integration test: `get_content` round-trips doc_id/chunk_id correctly.
 
-3) **Bring `model-guide` into compliance: attach source grades or label as unverified**
-- (a) What: Convert all benchmark and price claims into either (i) cited sources with Admiralty grades, or (ii) explicitly tagged `[UNVERIFIED]` / `[TRAINING-DATA]` with a date and “do not rely for decisions.”  
-- (b) Why (quant): Misrouting models even 10% of the time can multiply costs (e.g., using GPT‑5.2 on fact-sensitive work increases hallucination risk; your own table claims 42% error rate on factual queries without search).  
-- (c) Verify: Audit: count numeric assertions with citations/grades; target **>95%** graded or tagged.
+3) **Add a token-budgeted retrieval step inside `ask` (if you ship it), not “send all matching content”**
+- What: `ask` should (a) run retrieval (`search`) to get candidates, then (b) pack context up to a hard token limit (e.g., 150k tokens), with excerpting.
+- Why (quant): Prevents unbounded cost/latency; keeps p95 latency predictable and makes the “$0.01” claim meaningful.
+- Verify: `ask` never exceeds configured token cap; p95 latency ≤ 6s; cost per call distribution is stable (stddev bounded).
 
-4) **Hardwire portfolio/prediction outputs into researcher/model-review when in “investment mode”**
-- (a) What: Add an optional mode flag (even just a prompt convention) that forces: (i) at least one 30–90 day falsifiable prediction, (ii) probability + rationale, (iii) “portfolio action impact: none / watchlist / position-size change proposal (outbox).”  
-- (b) Why (quant): The GOALS define Brier < 0.2 and market calibration; without structured predictions, you cannot compute Brier, and you’ll drift into slow-feedback work.  
-- (c) Verify: Track % sessions producing logged predictions; target **>80%** for investment-mode sessions; compute Brier monthly.
+4) **Build an evaluation harness + query log from day 1**
+- What: Log `(query, chosen_strategy, indexes, latency, clicked_ids via get_content, override_used)`; provide `eval.py` to compute latency percentiles and retrieval metrics from a small labeled set.
+- Why (quant): This is the fastest error-correction loop for the MCP itself; without it, “auto routing” is uncalibrated.
+- Verify: Weekly report auto-generated; router accuracy and MRR trends visible; regression tests fail if metrics degrade beyond threshold.
 
-5) **Unify provenance ontologies (Admiralty vs researcher tags) with a deterministic mapping**
-- (a) What: Define a mapping: e.g., `[SOURCE:url primary] → A1/A2`, `[TRAINING-DATA] → F3`, `[INFERENCE] → C?` etc., or mandate one scheme repo-wide with exceptions documented.  
-- (b) Why (quant): Mixed schemes increase probability of provenance confusion; even a small confusion rate (5%) can poison the entity graph, which the constitution calls “the moat.”  
-- (c) Verify: Randomly sample 50 claims across outputs; inter-rater check (you + agent) that provenance is unambiguous; target **>95%** agreement.
+5) **Make index rebuild atomic (no partial reads)**
+- What: Require emb rebuild to write to `index.tmp` then rename, or implement a `.lock`/`.ready` protocol; MCP should only load indexes with a valid “ready marker” and consistent metadata.
+- Why (quant): Prevents intermittent failures and silent corruption—high leverage because it blocks hours of debugging.
+- Verify: Stress test: rebuild index in a loop while issuing 1,000 searches; zero exceptions; no “half-old half-new” states (detect via index version field).
 
 ---
 
-## 7. Where I'm Likely Wrong
+## 7. Where I’m Likely Wrong
 
-1) **I may be overstating the severity of the Gemini temperature conflict**  
-Because llmx/Gemini “temperature” behavior can be partially locked server-side (and the skill itself notes this), the practical difference may be small. The right fix is still measurement, not argument.
+1) **I may be over-penalizing CAG in v1**
+- Bias: scope-limiting. If your real workload is heavily synthesis over notes/transcripts, `ask` could be high leverage despite complexity. My recommendation assumes `ask` usage will be low.
 
-2) **My cost estimates may be materially off**  
-Token counts vary widely by context-bundling discipline and max output caps (Gemini often truncates). I used plausible midpoints; you should measure actual usage from llmx logs.
+2) **I’m assuming heterogeneous index scoring that breaks global ranking**
+- If emb already normalizes scores across indexes/models (or all your indexes share the same embedder/config), then “score comparability” is less of a problem. I treated it as unsafe by default because the plan doesn’t state constraints.
 
-3) **I may be too “production-grade” about verification ledgers**  
-A ledger can feel heavy for a personal project. The counterargument is that your constitution explicitly prioritizes error correction and provenance; a minimal CSV is lightweight and directly supports that.
+3) **I may be wrong about emb’s on-disk format**
+- If emb indexes are indeed single `.json` files with stable metadata, discovery is trivial and my “format assumption” concern mostly disappears. I flagged it because it’s a common failure mode.
 
-4) **I’m treating “correctness” as binary too often**  
-For architecture advice, truth is outcome-based (reliability, speed, cost). My Bayesian framing applies cleanly to atomic factual/code claims; it’s fuzzier for design recommendations.
+4) **I’m implicitly optimizing for measurable retrieval quality over developer convenience**
+- Bias: production-grade instincts. For a personal project, convenience may dominate until you see failures. My suggested eval harness and atomic rebuild protocol might feel heavy—though they’re still small relative to debugging time.
 
-5) **I assume these skills are used frequently enough to justify calibration infrastructure**  
-If `model-review` is only used occasionally, a full calibration pipeline may have diminishing returns. The remedy is to implement the lightest possible instrumentation first and scale only if usage is high.
+5) **My quantitative payback math relies on guessed usage rates**
+- If you only run a handful of searches per day, MCP wrapping has weaker ROI. Conversely, if you do 200/day, it’s a no-brainer. The correct decision depends on actual query volume—log it for a week to decide.

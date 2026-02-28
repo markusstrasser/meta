@@ -1,90 +1,67 @@
 ℹ Starting chat {"provider": "google", "model": "gemini-3.1-pro-preview", "stream": false, "reasoning_effort": null}
-Here is the cross-model architectural review of the agent skill library, evaluated against the project Constitution and Goals.
+⚠ Temperature override ignored: gemini/gemini-3.1-pro-preview only supports temperature=1.0 {"requested": 0.3, "using": 1.0}
+## 1. Where the Analysis Is Wrong
 
-## 1. Skill Dependency Graph
+*   **The Router Architecture:** The plan relies on a heuristic `classify_query` (e.g., `len(query.split()) <= 3 -> hybrid`) to hide the search strategy behind `strategy="auto"`. This is brittle. "FDA FAERS trajectory" is 3 words but requires semantic dense search, not hybrid/BM25. "NPI 1234567890" is 2 words and requires strict BM25. Masking this from the agent prevents the agent from correcting its own retrieval errors.
+*   **Dynamic Index Merging:** The plan suggests `search_all` across indexes. However, the existing `emb` API notes show `add_index()` "invalidates FTS cache" and merges into the current engine. If the `EnginePool` dynamically merges indexes per request based on the `indexes` parameter, it will constantly trigger FTS rebuilds and destroy the ~50ms latency. 
+*   **Memory Footprint Assumption:** The existing `emb` library loads the entire index (entries + numpy embedding arrays) into memory, plus a 149M parameter ModernBERT model and a 0.6B parameter reranker. An `EnginePool` that lazy-loads but doesn't unload multiple distinct indexes will quickly blow up the RAM on a local machine, causing swap thrashing.
+*   **Thread Safety:** The `emb` API notes explicitly state: *"Not thread-safe by default for embedding model"*. FastMCP handles requests asynchronously. If the agent fires off parallel searches (e.g., searching 3 different indexes simultaneously), the underlying embedding model will likely crash or block unpredictably.
 
-The library has evolved from isolated tools into a highly interdependent graph, but several links are implicit or broken.
+## 2. What Was Missed
 
-**Explicit Dependencies:**
-*   `investigate` → `competing-hypotheses` (Mandatory for leads >$10M)
-*   `investigate` → `source-grading` (Auto-applied)
-*   `investigate` → `researcher` (External validation phase)
-*   `competing-hypotheses` → `source-grading` (A1/A2 sources required for complexity gate)
-*   `researcher` → `epistemics` (Conditional: bio/medical)
-*   `researcher` → `source-grading` (Conditional: OSINT)
-*   `deep-research` → `researcher` (Hard redirect)
+*   **Provenance Truncation:** The `emb` search returns text truncated to 300 characters. The Constitution mandates: *"Every Claim Sourced and Graded"*. A raw 300-character middle-slice of a document might strip the source grade (e.g., `[A1]`, `[DATA]`) located at the top or bottom of the file. The MCP must guarantee that index name, original file source, and any metadata/grades are explicitly appended to the snippet payload.
+*   **Query Expansion / Contextualization:** The architecture research notes that `emb` already implements Anthropic's contextual retrieval (`emb contextualize`). But the MCP plan doesn't expose whether it searches the raw chunks or the contextualized chunks.
+*   **Error Handling for Missing Indexes:** The plan relies on `mtime` for cache invalidation. It misses the scenario where an index is deleted or corrupted by an external `emb` CLI process while the MCP is running.
 
-**Implicit Dependencies (The Gaps):**
-*   `architect` ⇢ `model-guide` & `llmx-guide`: `architect` uses `llmx` to call Gemini/Codex/Grok, but its documentation doesn't reference the prompting gotchas in `model-guide` (e.g., GPT-5.2 needing `--reasoning-effort high` and no CoT, Gemini needing temperature 1.0).
-*   `investigate` ⇢ `entity-management`: `investigate` Phase 5 (OSINT Layer) maps corporate DNA and address clusters, but never explicitly instructs the agent to persist these findings via `entity-management` files. This violates the "Compound, Don't Start Over" constitutional principle.
-*   **Circular/Conflict Risk:** `researcher` (Deep tier) and `competing-hypotheses` both dispatch parallel subagents. If `investigate` calls `researcher` which calls `competing-hypotheses`, you risk a recursive subagent explosion that will instantly blow the $2.14/task budget identified in the previous review.
+## 3. MCP vs Skill vs Subagent
 
-## 2. Constitutional Anchoring Analysis
+*   **For Retrieval (`search`, `get_content`, `indexes`):** MCP is the exact right abstraction. MCP is designed to expose data systems to an LLM without polluting the LLM's system prompt with integration code. It treats the local embedding store as a standard database.
+*   **For Synthesis (`ask` / CAG):** MCP is the **wrong** abstraction. Calling an LLM (Gemini) from inside a tool used by another LLM (Claude) creates an opaque subagent. It violates Principle 7 ("The reasoning chain must show its sources"). The main agent gets a summarized narrative back and cannot verify the citations or source grades because the context was stuffed into Gemini, not Claude. 
+*   **Alternative:** Retrieval should be an MCP. Synthesis (if Gemini's 1M context is required for cost/size) should be a dedicated Subagent or a Claude Code Skill where the system prompt explicitly enforces the "Skeptical but Fair" and "Quantify Before Narrating" rules.
 
-**Highly Anchored:**
-*   `model-review`: Excellent. Explicitly checks for `CONSTITUTION.md` and `GOALS.md` and injects them into the GPT/Gemini contexts.
-*   `investigate` & `competing-hypotheses`: Perfectly embody "Skeptical but Fair" and "Falsify Before Recommending".
-*   `source-grading`: The literal implementation of "Every Claim Sourced and Graded".
+## 4. Tool Granularity Assessment
 
-**Gaps and Violations:**
-*   `architect`: **Unanchored.** It evaluates proposals based on "Simplicity, Debuggability, Flexibility" (via `.architect/project-constraints.md`). It completely ignores the Generative Principle and the Autonomous Decision Test. Architectural decisions should be graded on: *Does this increase our error-correction rate per dollar?*
-*   `researcher`: **Weakly anchored to Goals.** It has domain profiles (Bio, Trading, OSINT), but forgets that the primary project goal is "$500M-$5B market cap public companies" and alpha generation. It treats all domains as equally important, which violates the "Investment Research First" mandate in `GOALS.md`.
-*   `code-research`: **Completely unanchored.** It is a generic coding tool that has no awareness of the project's epistemology or goals.
+Applying the existing ecosystem rule: *"Split a tool if there is a decision the agent should make between steps. Merge if the steps always execute together."*
 
-## 3. researcher/deep-research Overlap Assessment
+*   **`indexes`**: Keep. The agent must decide what domain to target.
+*   **`search` vs `get_content`**: Keep split. This is correct. The agent reads 10 snippets and makes a deliberate decision about which 2-3 are worth spending context window tokens on to read in full.
+*   **`search` index targeting**: The plan asks if it should merge results across all indexes by default. **No.** Do not merge by default. Force the agent to select indexes. If you merge git commits, papers, and chat history by default, the reranker will struggle to compare semantic relevance across entirely different ontological domains.
+*   **`ask`**: Remove entirely from this MCP (see Section 6).
 
-The redirect is clean in intent, but execution has flaws.
+## 5. Router Design
 
-**What works:**
-*   Consolidating into `researcher` with effort tiers (Quick/Standard/Deep) is a massive upgrade. `deep-research` previously wasted tokens on simple factual lookups.
-*   The "Diminishing Returns Gate" prevents the infinite-search loops that plagued earlier iterations.
+The heuristic router should be scrapped. 
 
-**What was lost / What's wrong:**
-*   **Tool Routing Obfuscation:** `researcher` states: *"Project-specific tool routing and gotchas are in `.claude/rules/research-depth.md`"*. This file is not in the provided context. By abstracting tool routing out of the skill and into a hidden `.claude/rules/` file, you've created a silent failure point. If that file is missing, the agent has to guess which MCP tools to use.
-*   **The "Deep" Tier is weaker than the original:** The original `deep-research` (implied by its legacy) likely had a stronger bias toward exhaustive, multi-session scraping. The new `researcher` skill relies heavily on Exa semantic search and Semantic Scholar. It lost the explicit instruction to manually traverse pagination and deeply scrape proprietary databases if MCP tools fail.
+The Constitution states: *"Instructions alone = 0% reliable. Prefer architectural enforcement."* If you want the agent to use the right search strategy, force it to declare its intent.
 
-## 4. Hook Patterns to Standardize
+Make `strategy` a required `Enum` parameter (`dense`, `bm25`, `hybrid`). Do not offer `auto`. 
+If the agent searches for a specific NPI number using `dense` and fails, it will receive an empty result, realize its error, and retry with `bm25`. This exercises the **Generative Principle** (maximizing error correction). An opaque heuristic router steals the agent's ability to learn how the database behaves and prevents it from executing precise, intentional queries.
 
-You have several critical epistemological patterns manually copy-pasted across skills. These must be extracted into architectural hooks (enforced by the system, not by prompt adherence).
+## 6. CAG Placement
 
-1.  **"Recitation Before Conclusion" (Du et al., EMNLP 2025):**
-    *   *Duplicated in:* `competing-hypotheses` (Step 4), `investigate` (Phase 7b), `researcher` (Phase 6b), `epistemics` (Recitation Before Synthesis).
-    *   *Fix:* This should not be a prompt instruction. It should be a system-level hook. Before the LLM is allowed to write a `<synthesis>` or `<conclusion>` tag, the system should force a `<recitation>` tag.
-2.  **Parallel Agent Dispatch:**
-    *   *Duplicated in:* `competing-hypotheses` (Step 2), `researcher` (Deep tier).
-    *   *Fix:* Both rely on `Task tool with subagent_type="general-purpose"`. This orchestration logic needs a dedicated standard library or MCP tool, especially since the previous review recommended moving to a cron/SQLite MVP that doesn't natively support complex subagent swarms.
-3.  **Fabrication Catching:**
-    *   *Duplicated in:* `researcher` (Phase 5), `epistemics` (LLM-Specific Failure Modes).
-    *   *Fix:* The warning "You WILL fabricate under pressure" is advisory. Move this to a validation hook: any DOI, PMID, or URL generated in the output must be pinged via a lightweight Python script before the commit is allowed.
+**CAG should NOT live in the Search MCP.**
 
-## 5. model-review Redesign Assessment
+1.  **Dependency Bloat:** Adding `litellm`, Gemini API keys, and LLM orchestration to a fast, local, offline vector search server pollutes the operational boundary. Search MCP should only depend on `emb` and `fastmcp`.
+2.  **Epistemic Opacity:** If the agent uses `ask`, it delegates the synthesis to a cheaper, smaller model (Flash-Lite) without seeing the raw text. This violates "Falsify Before Recommending" and "Every Claim Sourced and Graded" because the primary reasoning engine (Claude) is taking a summary on blind faith.
+3.  **Refactoring:** Leave `cag.py` in `papers-mcp` for now. If cross-domain synthesis becomes a verified bottleneck, create a dedicated `synthesis-skill` that takes a list of document IDs, fetches them via Search MCP, and runs the Gemini call with strict prompt engineering aligned to the Constitution.
 
-**What works:**
-*   The cognitive separation is brilliant: Gemini for convergent pattern-matching across massive context (`-t 0.3`), GPT-5.2 for formal/quantitative logical checks (`--reasoning-effort high`).
-*   Persisting outputs to `.model-review/YYYY-MM-DD/` stops the catastrophic loss of architectural history.
+## 7. Constitutional Alignment
 
-**What's still wrong:**
-*   **Token Budget Hallucination:** The script says "Gemini 3.1 Pro context (~50K-200K tokens target)" but the bash code just does `cat "$CONSTITUTION" >> ...` and `# Append source code... include everything`. There is zero actual token counting or truncation logic. If a user runs this on a large repo, it will blindly exceed limits or dilute attention.
-*   **Missing Context Injection:** It checks for `CONSTITUTION.md` and `GOALS.md`, but fails to check for `DOMAINS.md` or `.architect/project-constraints.md`. If you are reviewing a trading algorithm, missing `DOMAINS.md` means the models won't know about "Detrend before claiming correlation."
+*   **Passes - "The Join Is the Moat":** Exposing all `emb` indexes to the agent allows cross-domain signal fusion (e.g., matching a DOJ press release index with an SEC filings index).
+*   **Passes - "Fast Feedback":** ~50ms local search provides immediate operational feedback to the agent's query formulations.
+*   **Violates - "The Autonomous Decision Test":** The heuristic `strategy="auto"` router makes decisions *for* the agent, making the agent less informed about why a query returned specific results.
+*   **Violates - "Honest About Provenance":** Returning truncated strings without hardcoding the injection of the source file, source grade, and index name into the `text` field will lead to unsourced assertions entering the entity files.
 
-## 6. What the Previous Review Got Wrong
+## 8. What I'd Prioritize Differently
 
-Looking at the 2026-02-27 synthesis, several recommendations were actively harmful or contradictory to the skill library:
+1.  **Remove `ask` and all CAG code:** Drop `litellm` and Gemini dependencies. Keep the MCP strictly focused on sub-100ms byte retrieval. *(Verification: `pyproject.toml` contains only `fastmcp` and `emb`)*.
+2.  **Make `strategy` explicitly required:** Delete `router.py`. Force the agent to choose `dense`, `bm25`, or `hybrid` in the tool schema. *(Verification: Tool call fails if `strategy` is omitted)*.
+3.  **Require explicit index selection:** Remove "search all" defaults. Force the agent to call `indexes` first, then pass specific index names to `search`. *(Verification: `indexes` parameter in `search` has no default, and `EnginePool` does not attempt to merge incompatible FTS tables)*.
+4.  **Enforce Provenance in Snippets:** Wrap the `emb` search return dict to prepend `[Index: {name} | Source: {source}]` to every 300-char text snippet. *(Verification: Every `search` result string explicitly contains its origin metadata)*.
+5.  **Implement LRU Cache & Thread Locking in EnginePool:** Protect the non-thread-safe embedding model with an `asyncio.Lock()`, and only keep the 2-3 most recently used indexes in memory to prevent RAM exhaustion. *(Verification: Concurrent search requests do not crash the script, RAM usage remains stable during multi-index queries)*.
 
-1.  **The "Cron + SQLite + 15 turns max" MVP breaks the skills:**
-    *   *The Error:* The previous review recommended throwing away the Agent SDK and limiting sessions to 15 turns.
-    *   *The Reality:* Look at `investigate`. It has 8 distinct phases, including OSINT clustering, ACH, and cross-domain deep dives. Look at `researcher` (Deep tier). These workflows *cannot* be completed in 15 turns without an Agent SDK to manage subagents. By optimizing the orchestrator for simplicity, the previous review broke the complex investigative skills that generate the actual alpha.
-2.  **The "Outbox Pattern" is an unfunded mandate:**
-    *   *The Error:* The previous review and Constitution mandate an "outbox pattern" for trades.
-    *   *The Reality:* None of the skills (`investigate`, `researcher`, `entity-management`) actually implement this. There is no standard JSON schema or tool for proposing a trade. The agent is just writing markdown files. The architectural enforcement is missing.
-3.  **Model Tiering Contradiction:**
-    *   *The Error:* The previous review suggested "Haiku for entity refresh".
-    *   *The Reality:* `entity-management` requires strict provenance, cross-referencing (Zettelkasten), and staleness detection. Haiku is notoriously bad at maintaining strict citation formatting and XML tag adherence over long contexts. Using Haiku here violates the "Every Claim Sourced and Graded" principle because it will silently drop citations.
+## 9. Blind Spots In My Own Analysis
 
-## 7. Self-Identified Blind Spots
-
-Where my (Gemini 3.1 Pro) analysis should be distrusted:
-
-1.  **Production-Pattern Bias:** I am highly critical of the "Cron + SQLite" MVP because my training distribution favors enterprise orchestration (LangGraph, Temporal, Airflow). For a solo developer, the 15-turn cron MVP might actually be the only maintainable path, even if it means the `investigate` skill has to be heavily refactored into smaller, discrete state-machine steps.
-2.  **Context Window Arrogance:** I criticized the `model-review` script for lacking token counting. Because I have a 1M+ token window, I natively handle "cat everything" better than Claude or GPT. I might be underestimating how badly the lack of token chunking will break the GPT-5.2 side of the review.
-3.  **Bash Script Execution:** I am evaluating the `llmx` bash pipelines statically. I cannot test if `pbpaste | llmx` or the specific quote escaping in the `model-review` script will actually execute correctly in the user's specific zsh/bash environment. Subprocess piping with LLM-generated text is notoriously fragile.
+*   **M-Series Mac Unified Memory:** I am assuming RAM constraints based on standard local environments. If this is running on an M3 Max with 128GB of unified memory, holding 20 numpy arrays and the reranker in RAM simultaneously might be completely fine, making my LRU cache warning overly pedantic.
+*   **LLM Stubbornness:** I advocate forcing the agent to choose `strategy` manually. However, LLMs are notoriously lazy and might just default to `hybrid` for everything, wasting compute on reranking. The heuristic router *might* be a necessary evil to protect the system from the agent's own laziness.
+*   **CAG Pragmatism:** I am applying strict epistemic purity (Principle 7) to remove CAG. But if the actual daily workflow involves summarizing 40 long documents, removing `ask` might force the human to manually copy-paste IDs into a different tool, violating the goal of a "fully autonomous research pipeline." I may be over-weighting architectural purity over workflow convenience.
