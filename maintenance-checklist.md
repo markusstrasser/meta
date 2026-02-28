@@ -157,7 +157,7 @@ Reusable hook scripts symlinked into projects. All fail open (broken hook ≠ bl
 | `pretool-bash-loop-guard.sh` | PreToolUse | Blocks multiline for/while/if that causes zsh parse errors |
 | `posttool-bash-failure-loop.sh` | PostToolUse | Detects 5+ consecutive Bash failures, warns agent to stop retrying |
 
-**Deployed to:** intel (postwrite-source-check.sh, posttool-bash-failure-loop.sh, pretool-bash-loop-guard.sh)
+**Deployed to:** intel (postwrite-source-check.sh, posttool-bash-failure-loop.sh)
 **Not yet deployed:** selve (evaluate after intel trial)
 
 ## Key Architecture Docs
