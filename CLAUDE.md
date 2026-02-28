@@ -29,6 +29,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 ## Cross-Project Architecture
 | Layer | Location | Syncs how |
 |-------|----------|-----------|
+| Global CLAUDE.md | `~/.claude/CLAUDE.md` | Loaded in every project (universal rules) |
 | Shared skills | `~/Projects/skills/` | Symlinked into each project's `.claude/skills/` |
 | Project rules | `.claude/rules/` per project | Diverges intentionally (domain-specific) |
 | Project hooks | `.claude/settings.json` per project | Per-project, similar patterns |
