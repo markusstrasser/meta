@@ -36,10 +36,72 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 | Shared hooks | `~/Projects/skills/hooks/` | Referenced by path in each project's `settings.json` |
 | Project rules | `.claude/rules/` per project | Diverges intentionally (domain-specific) |
 | Project hooks | `.claude/settings.json` per project | Per-project, similar patterns |
-| Global hooks | `~/.claude/settings.json` | Loaded in every project (zsh loop guard) |
+| Global hooks | `~/.claude/settings.json` | Loaded in every project |
 | Research MCP | `~/Projects/papers-mcp/` | Configured in `.mcp.json` per project |
+
+## Shared Hooks Inventory
+
+Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings.json files.
+
+| Hook | Event | Blocks? | Deployed where | What it does |
+|------|-------|---------|----------------|--------------|
+| `pretool-bash-loop-guard.sh` | PreToolUse:Bash | exit 2 | Global | Blocks multiline for/while/if (zsh parse error #1) |
+| `pretool-data-guard.sh` | PreToolUse:Write\|Edit | exit 2 | (available) | Blocks writes to protected paths (datasets/, .parquet, .duckdb) |
+| `postwrite-source-check.sh` | PostToolUse:Write\|Edit | exit 2 | Intel | Blocks research file writes without source tags |
+| `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Intel | Tracks consecutive Bash failures, warns after 5 |
+| `stop-research-gate.sh` | Stop | exit 2 | Intel | Blocks stop if research files lack source tags; checks `stop_hook_active` |
+| `precompact-log.sh` | PreCompact | exit 0 (async) | Global | Logs compaction events + modified files to `~/.claude/compact-log.jsonl` |
+| `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end events to `~/.claude/session-log.jsonl` |
+| `add-mcp.sh` | (utility) | N/A | Manual | Adds MCP server presets to project `.mcp.json` |
+
+### Hook design principles
+- Deterministic > LLM-judged. Guard concrete invariants, not vibes.
+- Fail open (`exit 0` or `trap 'exit 0' ERR`) unless blocking is clearly worth it.
+- `trap 'exit 0' ERR` will swallow intentional `exit 2` from Python subprocesses — disable the trap before critical Python calls.
+- Stop hooks must check `stop_hook_active` to prevent infinite loops.
+- PreCompact and SessionEnd have **no decision control** — side-effect only (logging, backup, cleanup).
+
+## Claude Code Hook Events (verified 2026-02-28)
+
+17 events total. Source: https://code.claude.com/docs/en/hooks
+
+| Event | Fires when | Can block? | Hook types |
+|-------|-----------|------------|------------|
+| SessionStart | Session begins/resumes | No | command |
+| UserPromptSubmit | User submits prompt, before Claude sees it | Yes | command, prompt, agent |
+| PreToolUse | Before a tool call executes | Yes (deny/allow/ask) | command, prompt, agent |
+| PermissionRequest | Permission dialog appears | Yes (allow/deny) | command, prompt, agent |
+| PostToolUse | After a tool call succeeds | No | command, prompt, agent |
+| PostToolUseFailure | After a tool call fails | No | command, prompt, agent |
+| Notification | Claude Code sends a notification | No | command |
+| SubagentStart | Subagent spawned | No | command |
+| SubagentStop | Subagent finishes | Yes (block) | command, prompt, agent |
+| Stop | Claude finishes responding | Yes (block) | command, prompt, agent |
+| TeammateIdle | Agent team teammate about to go idle | Yes (exit 2) | command |
+| TaskCompleted | Task being marked completed | Yes (exit 2) | command |
+| ConfigChange | Config file changes during session | Yes (block) | command |
+| WorktreeCreate | Worktree being created | Yes (non-zero fails) | command |
+| WorktreeRemove | Worktree being removed | No | command |
+| PreCompact | Before context compaction | No | command |
+| SessionEnd | Session terminates | No | command |
+
+### Key fields
+- `stop_hook_active`: Boolean in Stop/SubagentStop input. True when agent is continuing due to a stop hook. Must check to prevent loops.
+- `last_assistant_message`: In Stop/SubagentStop. Claude's final response text.
+- `trigger`: In PreCompact. `manual` or `auto`.
+- `reason`: In SessionEnd. `clear`, `logout`, `prompt_input_exit`, `bypass_permissions_disabled`, `other`.
+
+### Decision control patterns
+- PreToolUse: JSON `hookSpecificOutput.permissionDecision` (allow/deny/ask)
+- PermissionRequest: JSON `hookSpecificOutput.decision.behavior` (allow/deny)
+- Stop, PostToolUse, SubagentStop, ConfigChange, UserPromptSubmit: JSON `decision: "block"`
+- TeammateIdle, TaskCompleted: exit code 2 blocks
+- WorktreeCreate: stdout = worktree path; non-zero exit fails creation
+- PreCompact, SessionEnd, Notification, WorktreeRemove: no decision control
 
 ## Session Forensics
 - Chat histories: `~/.claude/projects/-Users-alien-Projects-*/UUID.jsonl` (JSONL, one entry per message)
+- Compaction log: `~/.claude/compact-log.jsonl` (PreCompact hook, auto-logged)
+- Session log: `~/.claude/session-log.jsonl` (SessionEnd hook, auto-logged)
 - Error mining: Python script with `json.loads` per line, check `is_error`, `Exit code`, tool result content
 - Top error sources (Feb 2026): zsh multiline loops (178/wk), DuckDB column guessing (324/wk), llmx wrong flags (16/wk)
