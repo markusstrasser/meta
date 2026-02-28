@@ -17,6 +17,13 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 ## Hard Rule
 **Changes must be testable.** If you can't describe how to verify an improvement, it's not an improvement. "Add a rule that says X" is not testable. "After this change, the agent will do Y instead of Z in scenario W" is testable.
 
+## When to Add a Rule
+A session-analyst finding becomes a rule only if:
+1. **Recurs across 2+ sessions** — one-off domain findings are noise, not signal.
+2. **Not already covered** by an existing general rule (e.g., sycophancy pushback already covers domain-specific compliance failures).
+3. **Is a simple, checkable format rule** (">10 lines → use a .py file") OR is architectural (hook, test, scaffold).
+Reject everything else. Over-prescription rots faster than under-prescription.
+
 ## What This Repo Is NOT
 - Not a place to write more rules about rules. Instructions alone produce 0% reliable improvement (EoG, arXiv:2601.17915).
 - Not a place to document things that should be implemented. If you plan a change here, implement it in the target repo in the same session.
