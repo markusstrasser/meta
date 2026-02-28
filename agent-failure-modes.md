@@ -218,5 +218,45 @@ THEN context fills with noise before signal can be evaluated
 
 ---
 
-*Evaluated 2026-02-27. Updated with research sweep findings (40+ primary sources), community pattern analysis, and snippet/workflow audit.*
+### Failure Mode 21: Sycophancy / Compliance Without Pushback
+```
+IF user requests complex feature or questionable approach
+AND agent builds it without questioning whether it's the right approach
+THEN wasted effort + technical debt from unexamined decisions
+```
+**Source:** Direct observation (2026-02-28). Manual audit of ~5,600 lines across intel and selve found code that was built without the agent pushing back on scope, complexity, or necessity. Patterns: speculative features built "just in case," abstractions with single callers, config systems for hardcoded values, frameworks for single-use scripts. The agent's global CLAUDE.md explicitly says "No is a valid answer" and to challenge over-engineered solutions, but compliance overrides instructions under pressure to be helpful.
+
+**Why it persists:** Models are trained on RLHF that rewards helpfulness. Refusing a request or suggesting "don't build this" feels unhelpful even when it's the right answer. The sycophancy literature (arXiv:2310.13548, Sharma et al.) shows this is a fundamental alignment failure mode, not a prompting problem. Instructions alone don't fix it (Failure Mode 12 — EoG 0% Majority@3).
+
+**Manifestations:**
+- Building 200-line abstractions when 30 lines of direct code would work
+- Creating "infrastructure" before validating the need exists
+- Adding error handling for scenarios that can't happen in the current codebase
+- Implementing full feature when user was still exploring whether they want it
+
+**Mitigation:**
+- Architectural: Session analyst skill (`/session-analyst`) detects this pattern in transcripts post-hoc
+- Architectural: PostToolUse source-check hook (exit 2) enforces sourcing — but this only works for research files
+- Instructional: Global CLAUDE.md "No is a valid answer" rule (known insufficient — instructions alone = 0% reliable)
+- Future: Pre-build validation hook that checks for "who calls this?" before allowing Write to new files (needs AST analysis, not self-reporting)
+
+---
+
+### Failure Mode 22: Usage-Limit Spin Loop
+```
+IF agent hits repeated API/usage limits or consecutive command failures
+THEN it retries the same approach indefinitely instead of stopping
+```
+**Source:** Direct observation (2026-02-28, session intel f32653c6). 145 "out of extra usage" messages in a single session. Agent continued attempting to read task outputs, retry failed downloads, and poll completed subagents instead of halting and informing the user. Each retry burned tokens on identical failure patterns.
+
+**Why it persists:** The agent's default behavior is to be persistent and helpful. Retrying after a transient error is good behavior — but the agent cannot distinguish transient failures from systematic ones (rate limits, broken URLs, exhausted quotas). There's no built-in circuit breaker.
+
+**Mitigation:**
+- Architectural: PostToolUse:Bash hook (`posttool-bash-failure-loop.sh`) detects 5+ consecutive Bash failures and warns agent to stop retrying. Deployed to intel (2026-02-28).
+- Instructional: Cannot fully hook the API-level usage limit case — those messages come from the system, not from tool calls. Agent must learn to recognize "out of extra usage" as a signal to stop, not retry.
+- Future: If Claude Code adds an "on repeated error" hook type, migrate to that.
+
+---
+
+*Evaluated 2026-02-27, updated 2026-02-28. Updated with research sweep findings (40+ primary sources), community pattern analysis, snippet/workflow audit, sycophancy audit, and session-analyst findings.*
 *Sources: `~/Projects/selve/docs/universal_contracts.md`, `~/Projects/selve/docs/AGENT_PROTOCOLS.md`, research sweep (40+ primary sources), direct session observations.*
