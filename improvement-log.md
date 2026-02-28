@@ -65,7 +65,7 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Sycophancy — compliance without epistemic challenge on safety-critical classification
 - **Proposed fix:** [rule] "Distinguish mechanistic vs. heuristic changes before implementing. Mechanistic (parser fix, known-good data source) can proceed. Heuristic (new classification rule based on correlation/prior) requires stating the false-negative risk and requesting confirmation."
 - **Severity:** high
-- **Status:** [x] implemented — selve CLAUDE.md "Common Pitfalls" #8 (2026-02-28). Instructions-only; sycophancy is the hardest failure mode to enforce architecturally.
+- **Status:** [ ] rejected — one-off domain judgment, not a recurring pattern. General sycophancy pushback rule already covers this.
 
 ### [2026-02-28] BUILD-THEN-UNDO: Implemented and reverted heuristic auto-classification rules
 - **Session:** selve a2679f18
@@ -73,7 +73,7 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Failure mode:** Build-then-undo — direct consequence of missing pushback (above)
 - **Proposed fix:** Same as above — epistemic challenge before building prevents the undo
 - **Severity:** medium
-- **Status:** [x] implemented — linked to finding above (selve CLAUDE.md pitfall #8)
+- **Status:** [ ] rejected — linked to above
 
 ### [2026-02-28] TOKEN WASTE: 4 consecutive Read calls on same 700-line file
 - **Session:** selve a2679f18
