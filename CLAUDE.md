@@ -12,6 +12,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 - `improvement-log.md` — structured findings from session analysis (session-analyst appends here)
 - `frontier-agentic-models.md` — research report on agentic model behavior (4 papers read in full)
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval, Groq/Gemini assessment, routing decision framework
+- `search-mcp-plan.md` — design plan for search MCP (emb wrapper + RRF fusion + routing), cross-model reviewed
 
 ## Hard Rule
 **Changes must be testable.** If you can't describe how to verify an improvement, it's not an improvement. "Add a rule that says X" is not testable. "After this change, the agent will do Y instead of Z in scenario W" is testable.
