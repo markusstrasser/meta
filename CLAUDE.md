@@ -10,7 +10,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 - `maintenance-checklist.md` — pending improvements, monitoring list, sweep schedule
 - `agent-failure-modes.md` — documented failure modes from real sessions
 - `frontier-agentic-models.md` — research report on agentic model behavior (4 papers read in full)
-- `action-plan.md` — phased improvement plan across projects
+- `search-retrieval-architecture.md` — CAG vs embedding retrieval, Groq/Gemini assessment, routing decision framework
 
 ## Hard Rule
 **Changes must be testable.** If you can't describe how to verify an improvement, it's not an improvement. "Add a rule that says X" is not testable. "After this change, the agent will do Y instead of Z in scenario W" is testable.

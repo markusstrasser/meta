@@ -135,6 +135,9 @@ echo ".claude/" >> .gitignore
 mkdir -p .claude/rules .claude/skills
 ```
 
+## Key Architecture Docs
+- `search-retrieval-architecture.md` — CAG vs embedding retrieval decision framework, Groq/Gemini/Kimi assessment (2026-02-28)
+
 ## Ideas / Future Work
 
 ### Orchestrator MVP
