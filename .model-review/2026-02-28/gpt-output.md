@@ -1,283 +1,231 @@
 ℹ Starting chat {"provider": "openai", "model": "gpt-5.2", "stream": true, "reasoning_effort": "high"}
 ## 1. Logical Inconsistencies
 
-1) **“CAG when corpus ≤ 200K tokens” is not actually implementable from the proposed router**
-- Router `classify_query(query)` only inspects the query string, but the strategy table says CAG depends on *corpus size* (≤200K tokens). That requires inspecting candidate documents (or at least index stats) *after* index selection.
-- Formal contradiction: decision rule references a variable (corpus tokens) not available to the classifier.
+**A. “Git is redundant because MEMORY.md / improvement-log.md / CLAUDE.md are richer” conflates _content richness_ with _historical observability_.**  
+Even if those files are richer *at time t*, they are mutable summaries. Richness of the current snapshot does not imply richness of the *sequence* of states. Git is the only system in your stack that (a) is append-only in practice and (b) preserves prior states by default. Therefore “redundant” is logically invalid unless the agent (or you) never need to recover (or audit) prior states.
 
-2) **`ask` says “Sends all matching content” but “matching” is undefined**
-- What constitutes “matching” in `ask(question, indexes, sources)`?
-  - If it means “all documents in selected indexes,” that can exceed 1M context and is cost/latency explosive.
-  - If it means “documents matching the question,” then `ask` implicitly requires a retrieval step (i.e., a `search` call + top_k selection), which is not specified.
-- Unstated assumption: there exists an unambiguous, bounded mapping from question → included entries without retrieval parameters (top_k, threshold, token budget).
+**B. Mutability argument, formalized.**  
+Let:
+- \(S_t\) = repository state at time \(t\) (includes MEMORY.md, improvement-log.md, CLAUDE.md, code, etc.)
+- \(G\) = git DAG of commits, each commit has (diff \(D_t\), message \(M_t\), parent pointers \(P_t\))
 
-3) **Result score comparability across indexes is undefined**
-- The plan merges results across indexes “by default” and returns a single ranked list.
-- If different indexes use different embedding models, normalization, BM25 configs, or rerankers, raw similarity scores are not comparable. A global sort by `score` is formally invalid unless scores are calibrated onto a common scale.
-- Consequence: merged ranking can be arbitrarily wrong even if each per-index ranking is correct.
+Without structured commit messages, you still preserve \(S_t\) snapshots and \(D_t\) diffs. So *most* historical information is preserved. What is *not* preserved by diffs alone is any latent variable not encoded in file content, e.g.:
+- intent/goal \(I_t\) (“this change is a revert-to known-good behavior”, “this implements finding #12”)
+- evidence pointer \(E_t\) (which transcript lines, benchmark run, or observed failure caused the change)
+- verification status \(V_t\) (“tested via X”, “hypothesis only”)
+- causal linkage \(C_t\) across repos (“paired change with intel repo commit abc123”)
 
-4) **Deduplication across indexes is underspecified**
-- `search_all` says “merge and deduplicate results,” but there is no stable dedupe key:
-  - same content may appear with different IDs across indexes,
-  - same document may have multiple chunks with near-identical text,
-  - “source” may not be unique.
-- Without a defined equivalence relation (e.g., normalized URL, SHA256 of canonical text, doc_id+chunk_id), dedupe becomes heuristic and may destroy recall or inflate duplicates.
+If the mutable files always encode \((I_t, E_t, V_t, C_t)\) explicitly in their *text*, then diffs suffice. But they often won’t, because:
+- MEMORY.md is intentionally compacted/rewritten (lossy compression).
+- improvement-log.md statuses are edited in place (overwrites earlier uncertainty).
+- CLAUDE.md rules get refactored (removes earlier rationale).
 
-5) **Index format assumption: “Scan index_dir for .json files; each file = one index”**
-- This assumes emb indexes are single `.json` artifacts. Many embedding stores are multi-file (FAISS, SQLite, parquet, etc.). If emb uses anything other than `.json`, discovery fails.
-- Unstated assumption: emb’s on-disk representation is (and will remain) compatible with “one index = one json file.”
+Git diffs preserve the *edit history of those texts*, but they do not force inclusion of the missing latent variables. In other words: git diff preserves “what changed in the summaries,” not necessarily “why the underlying reality changed.”
 
-6) **Cache invalidation via mtime is not sufficient under common rebuild patterns**
-- If `emb embed` writes a temp file then renames, mtime changes are fine; if it writes in-place and updates multiple shard files, watching only one `.json` mtime can miss changes.
-- Race condition: a request can load a partially-written index if rebuild is in progress (needs atomic swap or file lock / “ready marker”).
+**C. Claude’s “agent never reads git log” is a non sequitur for designing the workflow.**  
+Your counter-argument is that *future* archaeology is for you (or a future agent) under failure/recovery. A workflow should be optimized for the highest-cost failure modes, not only the nominal current behavior. “Not currently consumed” ≠ “never valuable,” especially when the marginal cost for an agent is low.
 
-7) **Router edge cases likely to fail (systematic misclassification)**
-- **Quoted terms + synthesis intent**: `compare "X" vs "Y"` → BM25 by rule order, but intent is synthesis; wrong.
-- **IDs inside conceptual questions**: “Why did contract W52P1J-… matter?” → BM25 though semantic retrieval may be better.
-- **Short conceptual queries**: “adverse events” (2 words) → hybrid though dense might be better.
-- **Long exact-match queries** without quotes: “10-Q filed 2023-11-07 revenue recognition policy” → dense by default though BM25 may be superior.
-- **Synthesis without keywords**: “What changed between these two memos?” → may route to dense/hybrid, not CAG.
+**D. Redundancy claim ignores the “single point of failure” coupling.**  
+If the only place linking a rule change to evidence is inside mutable docs, then a later refactor can delete that link. Git diffs can recover it, but only if it was ever written down. Structured commit metadata is a second channel that is harder to accidentally erase during doc compaction.
 
-8) **Tool output schema conflicts with stated workflow**
-- `search` returns `text` (truncated) plus `id`; `get_content` returns full text. But truncation length (“300 chars”) is specified in prose, not in schema—clients can’t rely on it.
-- For “honest about provenance,” results should include `index`, `doc_id`, `chunk_id`, `source_uri`, `created_at/observed_at`; plan mentions only some informally.
+**What is actually lost without structured commits?**  
+Not the evolution of the files (git keeps that), but the evolution of *interpretation*: mapping from changes → reasons/evidence/verification/cross-links. Diffs preserve syntax; structured metadata preserves semantics that were never written into the file bodies.
 
-9) **Cost claims are too precise without a measurement plan**
-- “EMB ~$0.0001/query” and “CAG ~$0.01/query” are plausible order-of-magnitude, but they’re not tied to token counts, caching hit rate, or rerank model choice. As written, they’re not falsifiable and may be misleading.
+**What is preserved by git diff alone?**  
+Everything that is literally represented in the repository content at each commit: prior versions of MEMORY.md / improvement-log.md / CLAUDE.md, and therefore the exact text of earlier rationales *if they were present*. If your process guarantees “all rationale/evidence goes into versioned text,” then commit-message structure adds much less.
 
 ---
 
 ## 2. Cost-Benefit Analysis
 
-Assumptions (make these explicit to evaluate): single developer, Python familiarity, emb is importable, MCP is already used in your workflow, and you’ll issue **~30–100 local searches/day** once integrated.
+Below, “token cost” assumes the agent writes messages; human friction is near-zero, but rule complexity and failure modes still matter.
 
-### Tool 1: `search`
-- **Effort (impl + tests)**: ~6–12 hours if emb API is clean; 12–24 hours if you must adapt index IO / scoring / chunk formats.
-- **Usage frequency**: Very high (core primitive): expected 20–100 calls/day once habitual.
-- **Value delivered**:
-  - Primary: makes emb usable from any MCP-enabled agent without shelling out; reduces friction (context switch + manual CLI calls).
-  - Secondary: routing saves manual choice overhead.
-- **ROI vs emb CLI**:
-  - If CLI call + parsing costs you even **20 seconds** each and you do **40/day**, that’s ~13 minutes/day. At 5 days/week, ~1.1 hours/week. Payback in **1–2 weeks** for a 10–20 hour build.
-  - Biggest risk: merged ranking incorrect due to uncalibrated scores across indexes (can *increase* error rate unless fixed).
+### A) Feature branches (per change or per topic)
+**Cost**
+- Tokens: +50–300 tokens/commit-equivalent (branch naming, switching, merge text, occasional conflict narration).
+- Workflow friction: medium (extra commands; more DAG complexity; more states).
+- Rule complexity: medium-high (when to branch, naming scheme, cleanup, cross-repo coordination).
 
-### Tool 2: `get_content`
-- **Effort**: ~2–6 hours (depends on how emb stores full text vs chunks).
-- **Usage frequency**: High (paired with search): 5–30 calls/day.
-- **Value delivered**:
-  - Cuts token waste and latency by avoiding fetching full texts for all hits.
-  - Encourages “retrieve then read” discipline (supports error correction).
-- **ROI vs embedding full text into search output**:
-  - If average full text is 5–50 KB and top_k=10, always returning full text can add 50–500 KB per call and slow the agent. Separation is justified.
+**Benefit (specific scenarios)**
+- Parallel work isolation (two experiments at once).
+- Easy rollback of an entire experiment (delete branch).
+- “Batching” related commits into a merge event (useful if merge triggers automation).
 
-### Tool 3: `indexes`
-- **Effort**: ~2–4 hours if metadata exists; 6–10 hours if you must infer stats by scanning indexes.
-- **Usage frequency**: Medium-low (discovery/debug): maybe 1–5 calls/day initially, then 1–5/week.
-- **Value delivered**:
-  - Prevents “searching the wrong corpus” errors.
-  - Enables index selection (critical if merging across indexes is confusing).
-- **ROI vs “just know the index names”**:
-  - Small but positive; also helps testing and monitoring.
+**ROI under your constraints**
+- Low. Solo, no PRs/CI, changes are rapid-fire, and the agent is already committing directly. Branching mainly adds operational surface area (more ways to get confused or leave dangling work) without a consumer that requires it.
 
-### Tool 4: `ask` (CAG)
-- **Effort**: ~8–20 hours (litellm integration, token budgeting, prompt formatting, safety, tests, caching behavior).
-- **Usage frequency**: Low (specialized): likely 0–5 calls/day.
-- **Value delivered**:
-  - Best when you need cross-document synthesis (timelines, contradiction spotting).
-  - But it overlaps with papers-mcp’s CAG for papers; incremental value is mainly for *non-paper* corpora (notes, git, transcripts).
-- **ROI vs “agent does search + manual synthesis”**:
-  - If used rarely, it may not repay the complexity early.
-  - Given your own “fast feedback over slow feedback” and “instructions alone = 0% reliable,” CAG adds a slow, probabilistic layer that is harder to score unless you build evals.
+### B) `--no-ff` merges (forced merge commits)
+**Cost**
+- Tokens: +30–150 tokens per merge message; plus branch overhead.
+- Workflow friction: medium (requires branch usage; more merges).
+- Rule complexity: medium (when to merge, when to squash, reverts).
 
-**Bottom line**: Building MCP wrappers for **`search` + `get_content` + `indexes`** is strongly worth it. **`ask`** is only worth it in v1 if (a) you have a concrete non-paper synthesis workflow you’ll use weekly and (b) you implement strict token budgets + evaluation.
+**Benefit**
+- Provides a “topic boundary” node in history (merge commit acts as a label).
+- Makes it easy to revert an entire topic with `git revert -m`.
 
----
+**ROI**
+- Low to medium, but only if you actually group work into topics and later need topic-level reverts. Your current pattern (many tiny commits in minutes) suggests topic merges would either be too frequent (noise) or too coarse (delay information).
 
-## 3. Testable Predictions
+### C) Trailers (e.g., `Evidence:`, `Verifiable:`, `Reverts-to:`, `Refs:`)
+**Cost**
+- Tokens: +10–80 tokens/commit (short structured lines).
+- Workflow friction: low (agent can template it).
+- Rule complexity: low-medium (define allowed keys + semantics).
 
-Convert key claims into falsifiable metrics with acceptance thresholds:
+**Benefit**
+- **Creates an explicit, queryable join key** between:
+  - commit ↔ transcript snippet / session id / benchmark run id
+  - commit ↔ improvement-log entry id
+  - commit ↔ “verification performed” state
+  - commit ↔ revert targets
+- Improves archaeology speed: `git log --grep Evidence:` or parseable metadata for scripts.
+- Reduces risk that doc compaction deletes provenance: provenance duplicated in commit metadata.
 
-1) **Latency claim**
-- Prediction: `search(strategy=hybrid, top_k=10, rerank=False)` returns in **p50 ≤ 80ms**, **p95 ≤ 200ms** on your laptop for a warmed index.
-- Test: 1,000 queries sampled from a query log; measure end-to-end MCP tool latency.
+**ROI**
+- High. This is the sweet spot: minimal overhead, maximal future retrievability. Especially valuable because your mutable docs are intentionally lossy.
 
-2) **Cost claim**
-- Prediction: Average marginal cost per `search` call is **$0** external and CPU time ≤ 250ms p95 (rerank off).
-- Prediction: `ask` average Gemini cost is within **±2×** of estimate when measured as `$ per 1,000 calls` at a fixed token budget (see below).
-- Test: instrument tokens in/out and billable units; report mean/median.
+### D) “Structured messages” beyond trailers (long narrative templates, strict sections, etc.)
+**Cost**
+- Tokens: +100–400 tokens/commit (if enforced).
+- Workflow friction: low for agent, but higher cognitive overhead in enforcement + consistency.
+- Rule complexity: medium (template compliance; exceptions; noisy verbosity).
 
-3) **Router accuracy**
-- Prediction: Router’s `auto` strategy matches the strategy chosen by a human labeler in **≥80%** of cases on a blinded set of **200** historical queries.
-- Test: collect queries, have you label ideal strategy (bm25/dense/hybrid/cag), compute accuracy + confusion matrix.
+**Benefit**
+- More context at the point of change; helps humans scanning history.
+- Can substitute for missing “why” in the diffs.
 
-4) **Router benefit (not just accuracy)**
-- Prediction: Using `strategy=auto` improves **MRR@10** (mean reciprocal rank) by **≥10%** vs always-dense, on a benchmark of **100** queries with known relevant documents.
-- Test: build a small gold set (query → relevant doc IDs) and evaluate ranking metrics.
+**ROI**
+- Medium at best. If overdone, it becomes low-signal noise, and you still may not read it. Trailers give most of the machine-parseable value at a fraction of the cost.
 
-5) **Merged-index ranking validity**
-- Prediction: With your chosen merge method, merged search across N indexes has **nDCG@10 within 5%** of an oracle that searches each index and picks the best index per query.
-- Test: evaluate per query across indexes; compare.
+### E) Keep simple semantic commits on `main` (status quo)
+**Cost**
+- Lowest.
 
-6) **Dedup correctness**
-- Prediction: Duplicate rate in top-20 results is **≤10%** (by doc identity) on 100 sampled queries.
-- Test: define doc identity (URI/SHA), compute duplicates.
+**Benefit**
+- Minimal process failure modes.
+- Fast iteration; fewer git “meta” errors.
 
-7) **Index invalidation correctness**
-- Prediction: After rebuilding an index file, the next `search` observes new content within **≤2 seconds** without restarting the server, and never loads a partially written index.
-- Test: rebuild in a loop while querying; assert atomicity (no exceptions, and results switch cleanly).
-
-8) **CAG usefulness (if included)**
-- Prediction: For a fixed set of 50 synthesis questions, `ask` reduces your “time to answer” by **≥30%** vs `search+manual`, without increasing factual error rate above **5%** (as judged by spot-check against source excerpts).
-- Test: timed trials + factuality scoring.
+**ROI**
+- Good for speed, but it does not address your strongest counterpoint: provenance survivability and later forensic reconstruction.
 
 ---
 
-## 4. Constitutional Alignment (Quantified)
+## 3. Information Theory Angle
 
-Scoring: **coverage** = how much the design *architecturally enforces* the principle (not whether it gestures at it). “Suggested fixes” are concrete enforcement mechanisms.
+Let:
+- \(D_t\) be the diff content of commit \(t\).
+- \(M_t\) be the commit message (including trailers).
+- \(H\) be the latent “human/agent intent and justification” random variable: why this change happened, what it was responding to, and how confident we are.
 
-1) **Autonomous Decision Test** — **70%**
-- Coverage: Clear focus on making retrieval faster/better-informed.
-- Gap: No metric loop tying tool behavior to improved decisions (no retrieval eval harness by default).
-- Fix: add built-in logging + offline eval script (MRR/nDCG, latency) and make “improve these metrics” the acceptance gate.
+**Key fact:** \(D_t\) does not uniquely determine \(H\). Many intents produce identical diffs.
 
-2) **Skeptical but Fair** — **55%**
-- Coverage: Neutral; retrieval is not biased by intent.
-- Gap: CAG can amplify spurious synthesis; no built-in counterevidence retrieval mode.
-- Fix: add `search(mode="pros_and_cons")` is scope creep; better: add a simple option `diversity=True` to increase result diversity and reduce cherry-picking; measure contradiction rate.
+Formally, the additional value of commit metadata is the **conditional mutual information**:
+\[
+I(H; M_t \mid D_t)
+\]
+If this is > 0, then messages add information not recoverable from diffs.
 
-3) **Every Claim Sourced and Graded** — **35%**
-- Coverage: Mentions `source` in results.
-- Gaps:
-  - No source grading field in schema (`grade` missing).
-  - No guarantee that returned text is tied to a stable primary source URI.
-- Fix: extend result schema: `{source_uri, source_type, source_grade, observed_at, index, doc_id, chunk_id}` and enforce non-null for entity-file-related indexes.
+Concrete examples where \(I(H; M \mid D)\) is large:
+- Same diff could be (a) bug fix, (b) speculative refactor, (c) revert due to regression, (d) performance experiment.
+- “Remove rule X” could be due to (a) benchmark failure, (b) redundancy, (c) conflict with new tool behavior.
+- “Update MEMORY.md” could be (a) compaction only, (b) policy change, (c) correction after false belief.
 
-4) **Quantify Before Narrating** — **40%**
-- Coverage: Costs/latency are mentioned.
-- Gap: No quantitative retrieval quality targets; no budgets (token caps for CAG, timeouts).
-- Fix: enforce token budget in `ask` (hard cap) + return `cost_estimate` and `tokens_used` in responses.
+**Trailers increase information density because they encode identifiers.**  
+Identifiers (session id, transcript offsets, improvement-log entry id) are high-leverage bits: they let you retrieve large external context with a few bytes. This is classic indexing: small message, large recall.
 
-5) **Fast Feedback Over Slow Feedback** — **75%**
-- Coverage: Prefers local search; heuristics to avoid LLM router; separate `ask` to make cost explicit.
-- Gap: Without eval/telemetry, you won’t know if “fast” is also “correct.”
-- Fix: add automatic latency + success metrics logging (e.g., whether user calls `get_content` after `search`, proxying usefulness).
-
-6) **The Join Is the Moat** — **60%**
-- Coverage: Single search surface over multiple indexes supports cross-domain reuse.
-- Gap: No entity-aware join layer (IDs, canonical entities) and merged ranking may be invalid.
-- Fix: introduce a minimal canonical document identity across indexes (URI/SHA) and optional “entity_id” field if indexes support it. This creates compounding join value.
-
-7) **Honest About Provenance** — **50%**
-- Coverage: Separation of retrieval (`search`) and synthesis (`ask`) helps.
-- Gap: `ask` output can blur what is quoted vs inferred unless you enforce citations.
-- Fix: require `ask` to return structured citations: answer + list of (doc_id, excerpt, offset). Reject responses without citations (architectural hook).
-
-8) **Use Every Signal Domain** — **65%**
-- Coverage: Index-agnostic; supports many corpora.
-- Gap: No mechanism to prioritize domains or ensure discoverability.
-- Fix: index metadata should include `domain`, `source_type`, and be queryable; then you can route/weight by domain.
-
-9) **Portfolio Is the Scorecard** — **20%**
-- Coverage: Indirect only.
-- Gap: No linkage to trades, predictions, or decision outcomes.
-- Fix: log query→artifact→decision link IDs (even manually) so you can later correlate retrieval behavior with portfolio outcomes.
-
-10) **Compound, Don’t Start Over** — **70%**
-- Coverage: Index discovery + reload supports continuous updating; MCP reuse across projects compounds.
-- Gap: No versioning of index metadata; no changelog of index rebuilds.
-- Fix: keep a small `indexes_manifest.json` with build timestamps, source snapshots, embedding model version; include in `indexes()` output.
-
-11) **Falsify Before Recommending** — **30%**
-- Coverage: Not addressed; retrieval can support falsification but no explicit affordance.
-- Fix: add a parameter `search(intent="disconfirm")` that (a) expands query with negations/counterterms via a deterministic ruleset or (b) retrieves diverse results; measure whether users retrieve counterevidence more often.
-
-**Autonomy boundaries / “Human-protected”** — **90%**
-- Coverage: MCP server only retrieves; no trade execution.
-- Gap: If `ask` is used to generate narrative, it may be mistakenly treated as “truth.” That’s a workflow risk, not an autonomy violation.
-- Fix: return explicit provenance + cost + uncertainty fields; enforce citation requirement.
-
-**“Instructions alone = 0% reliable” (governance meta-rule)** — **45%**
-- Coverage: Good instinct (heuristic router, separate tools).
-- Gap: Many requirements are only described in docstrings (“truncate to 300 chars,” “flag if corpus too large”) with no enforcement.
-- Fix: add schema validation + unit tests asserting truncation, max tokens, citation presence, and atomic index reload.
+**When is that extra signal actually consumed?**
+- By *you* during incident response (“why did we change this rule?”).
+- By a future agent tasked with regression analysis (“find commits with unverified changes”).
+- By scripts that triage (“list commits affecting CLAUDE.md with Verifiable: no”).
+Right now Claude doesn’t read git log, but the consumer can be a later tool, hook, or human under time pressure.
 
 ---
 
-## 5. Answers to Open Questions
+## 4. Testable Predictions
 
-1) **Merge results across all indexes by default?**
-- Recommendation: **Default = search all, but do not produce a single global ranking unless you implement score calibration / rank fusion.**
-- Quant justification:
-  - If scores aren’t comparable, global sorting can reduce precision materially. A safe approach is **Reciprocal Rank Fusion (RRF)** on per-index ranks: robust, parameter-light.
-  - Implement RRF and report results grouped with an overall fused rank + per-index rank.
-- Success metric: merged-all nDCG@10 within **5–10%** of best-single-index oracle on a 100-query benchmark.
+### Claim A: “Structured git helps archaeology.”
+**Prediction A1 (time-to-answer):**  
+Given a random sample of 20 “why was this changed?” questions (drawn from rule/memory edits and hook changes), median time-to-answer using:
+- (i) diffs only + current docs
+vs
+- (ii) diffs + trailers linking to evidence
+will be lower in (ii) by ≥30–60%.
 
-2) **Router configurable per-index?**
-- Recommendation: **Yes, via index metadata hints**, but keep it minimal: `{preferred_strategies, default_strategy, supports_rerank, score_scale}`.
-- Quant justification:
-  - Hints reduce systematic error where corpus type dominates (e.g., git commits often benefit from BM25).
-  - Expect router accuracy gain of **~5–15 percentage points** on mixed-corpus queries (to be measured).
-- Test: stratified router evaluation by index type; require improvement vs global heuristics.
+**Protocol:**  
+Blind the evaluator to the condition; require evidence citation (transcript line range or improvement-log id). Measure time and correctness.
 
-3) **Is CAG worth including in v1?**
-- Recommendation: **Defer CAG (`ask`) unless you can name ≥2 weekly workflows it will accelerate.**
-- Quant justification:
-  - Added complexity (litellm, token budgeting, citation enforcement) is ~8–20 hours plus ongoing maintenance.
-  - If usage is <20 calls/week, time saved must exceed build cost; at, say, 2 minutes saved/call → 40 min/week; payback ~3–6 weeks *if* quality holds. If usage is lower or error rate is higher, it’s negative EV.
-- If included: enforce hard token cap + citation schema; otherwise it will violate “fast feedback” and “provenance” in practice.
+**Prediction A2 (answer completeness):**  
+Fraction of questions where you can identify a specific triggering observation (not just “refactor/cleanup”) increases by ≥25% with trailers.
 
-4) **Index directory convention (`~/embeddings/` vs wherever)**
-- Recommendation: **Do not force a convention; support multiple directories + explicit configuration.**
-- Quant justification:
-  - Forcing migration has one-time cost and risk of breaking existing pipelines.
-  - Supporting `SEARCH_INDEX_DIR` as a **colon-separated list** (`dir1:dir2`) yields near-zero marginal complexity and reduces user friction.
-- Metric: “time-to-first-successful-search” from clean setup ≤ 5 minutes (manual test).
+**When would the agent query history?**  
+If you add a “regression-forensics mode” tool: on failure, the agent runs `git bisect` or `git log -S` and summarizes. Prediction: with trailers, the agent can also retrieve the matching transcript chunk automatically, improving fix rate or reducing tokens spent.
 
----
+### Claim B: “Branch/merge events as hook targets help automated review.”
+**Prediction B1 (automation separability):**  
+If you implement hooks triggered on `git merge`, you can run heavier checks only at “integration points.” This reduces total check invocations by ≥50% while maintaining detection of ≥90% of issues those checks catch.
 
-## 6. My Top 5 Recommendations (different from the originals)
+**Counter-test:**  
+Implement the same heavy check triggered by existing events (e.g., PostToolUse after edits to CLAUDE.md / hooks) and compare:
+- number of runs
+- issues caught
+- latency to detection
 
-1) **Implement rank fusion (RRF) instead of score-sorting for multi-index search**
-- What: For each index, get top_k per-index results, then fuse with RRF: `score = Σ 1/(k0 + rank_i)` (k0 ~ 60).
-- Why (quant): Prevents invalid cross-index score comparisons; typically improves robustness with heterogeneous corpora. Expect measurable lift in nDCG@10 and fewer “obviously wrong” top hits.
-- Verify: On a 100-query gold set, merged-all nDCG@10 improves **≥10%** vs naive global score sort; duplicate rate in top-20 ≤10%.
+**Likely outcome in your environment:**  
+Because there is no native merge hook and branching isn’t currently used, merge-triggered automation will either (a) never run, or (b) require behavioral change (branches) whose overhead dominates. Existing hooks can already trigger on file patterns and tool usage; the incremental capability of “merge boundary” is small unless you adopt topic batching.
 
-2) **Add structured provenance fields and enforce them with schema validation**
-- What: Results must include `{index, doc_id, chunk_id, source_uri, source_type, observed_at}`; optionally `{source_grade}` where available.
-- Why (quant): Reduces downstream “unsourced claim” risk and enables later audits; also enables dedupe and join.
-- Verify: Unit tests: 100% of returned results include required fields; integration test: `get_content` round-trips doc_id/chunk_id correctly.
+### Claim C: “Zero friction means we should add rich metadata.”
+**Prediction C1 (noise floor):**  
+If you require long structured messages, the proportion of low-signal boilerplate rises over time (template compliance without thought). Measurable as: entropy of message body excluding template lines decreases across commits.
 
-3) **Add a token-budgeted retrieval step inside `ask` (if you ship it), not “send all matching content”**
-- What: `ask` should (a) run retrieval (`search`) to get candidates, then (b) pack context up to a hard token limit (e.g., 150k tokens), with excerpting.
-- Why (quant): Prevents unbounded cost/latency; keeps p95 latency predictable and makes the “$0.01” claim meaningful.
-- Verify: `ask` never exceeds configured token cap; p95 latency ≤ 6s; cost per call distribution is stable (stddev bounded).
-
-4) **Build an evaluation harness + query log from day 1**
-- What: Log `(query, chosen_strategy, indexes, latency, clicked_ids via get_content, override_used)`; provide `eval.py` to compute latency percentiles and retrieval metrics from a small labeled set.
-- Why (quant): This is the fastest error-correction loop for the MCP itself; without it, “auto routing” is uncalibrated.
-- Verify: Weekly report auto-generated; router accuracy and MRR trends visible; regression tests fail if metrics degrade beyond threshold.
-
-5) **Make index rebuild atomic (no partial reads)**
-- What: Require emb rebuild to write to `index.tmp` then rename, or implement a `.lock`/`.ready` protocol; MCP should only load indexes with a valid “ready marker” and consistent metadata.
-- Why (quant): Prevents intermittent failures and silent corruption—high leverage because it blocks hours of debugging.
-- Verify: Stress test: rebuild index in a loop while issuing 1,000 searches; zero exceptions; no “half-old half-new” states (detect via index version field).
+**Prediction C2 (parse utility):**  
+If you limit structure to trailers with constrained keys, machine parsing success stays ≥95% after 100 commits; with free-form templates it drops (inconsistent formatting).
 
 ---
 
-## 7. Where I’m Likely Wrong
+## 5. My Recommendation
 
-1) **I may be over-penalizing CAG in v1**
-- Bias: scope-limiting. If your real workload is heavily synthesis over notes/transcripts, `ask` could be high leverage despite complexity. My recommendation assumes `ask` usage will be low.
+**Do: keep main-only, but add lightweight structured trailers on commits that touch self-optimization artifacts.**  
+Specifically:
 
-2) **I’m assuming heterogeneous index scoring that breaks global ranking**
-- If emb already normalizes scores across indexes/models (or all your indexes share the same embedder/config), then “score comparability” is less of a problem. I treated it as unsafe by default because the plan doesn’t state constraints.
+1. **No feature branches by default.**  
+   Use branches only for unusually risky or multi-hour experiments (rare).
 
-3) **I may be wrong about emb’s on-disk format**
-- If emb indexes are indeed single `.json` files with stable metadata, discovery is trivial and my “format assumption” concern mostly disappears. I flagged it because it’s a common failure mode.
+2. **No forced `--no-ff` merges.**  
+   Since you’re not using branches, this is moot; don’t introduce it just to create events.
 
-4) **I’m implicitly optimizing for measurable retrieval quality over developer convenience**
-- Bias: production-grade instincts. For a personal project, convenience may dominate until you see failures. My suggested eval harness and atomic rebuild protocol might feel heavy—though they’re still small relative to debugging time.
+3. **Adopt a minimal trailer schema (machine-parseable, optional but encouraged):**
+   - `Evidence: session/<id>#L<start>-L<end>` (or transcript hash/offset)
+   - `Refs: improvement-log#<n>` (stable id in that file)
+   - `Verifiable: yes|no` (means: “there exists a check; it was run/passed”)
+   - `Reverts-to: <commit>` (only when relevant)
+   - `Affects: memory|rules|hooks|code` (small controlled vocabulary)
 
-5) **My quantitative payback math relies on guessed usage rates**
-- If you only run a handful of searches per day, MCP wrapping has weaker ROI. Conversely, if you do 200/day, it’s a no-brainer. The correct decision depends on actual query volume—log it for a week to decide.
+4. **Enforce trailers only for commits modifying** `CLAUDE.md`, `MEMORY.md`, `improvement-log.md`, and hook code/config.  
+   For ordinary product code commits, keep messages simple.
+
+5. **Add one hook (or agent rule) that blocks commits touching those files unless `Evidence:` or `Refs:` exists.**  
+   This directly addresses mutability/provenance loss with minimal process overhead.
+
+This gives you the archaeological “join keys” you’re actually missing, without the operational complexity of branching/merging.
+
+---
+
+## 6. Where I’m Likely Wrong
+
+1. **Overestimating future archaeology needs.**  
+   If you rarely do postmortems and almost never need “why,” then even trailers are overhead. My recommendation assumes at least occasional forensic work.
+
+2. **Assuming identifier stability is easy.**  
+   If session transcripts are “ephemeral” (moved, pruned, or not addressable by stable ids), then `Evidence:` links may rot. The fix is to standardize stable session ids or store an immutable excerpt hash—extra work I’m not fully costing.
+
+3. **Underestimating the value of topic boundaries for cognition.**  
+   Even solo, merge commits can be cognitively useful as “chapters.” I’m discounting that because your current cadence is rapid-fire and you haven’t needed chapters yet.
+
+4. **Bias toward machine-parseable process.**  
+   I’m optimizing for future automation and auditability (a “production-grade” instinct). If your top priority is uninterrupted creative flow and you’re comfortable using `git log -p` + grep, my solution may be too formal.
+
+5. **Assuming agent compliance remains perfect.**  
+   If the agent sometimes produces incorrect trailers (“Verifiable: yes” without actually running checks), structured metadata can create false confidence. You’d need either automated verification or conservative semantics (“Verifiable: no” unless proven).
+
+Overall: structured *trailers* are the highest signal-per-cost lever; branches and `--no-ff` merges are low ROI under your stated constraints.

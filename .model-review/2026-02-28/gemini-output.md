@@ -1,67 +1,70 @@
 ℹ Starting chat {"provider": "google", "model": "gemini-3.1-pro-preview", "stream": false, "reasoning_effort": null}
 ⚠ Temperature override ignored: gemini/gemini-3.1-pro-preview only supports temperature=1.0 {"requested": 0.3, "using": 1.0}
-## 1. Where the Analysis Is Wrong
+## 1. Where Claude's Analysis Is Wrong
 
-*   **The Router Architecture:** The plan relies on a heuristic `classify_query` (e.g., `len(query.split()) <= 3 -> hybrid`) to hide the search strategy behind `strategy="auto"`. This is brittle. "FDA FAERS trajectory" is 3 words but requires semantic dense search, not hybrid/BM25. "NPI 1234567890" is 2 words and requires strict BM25. Masking this from the agent prevents the agent from correcting its own retrieval errors.
-*   **Dynamic Index Merging:** The plan suggests `search_all` across indexes. However, the existing `emb` API notes show `add_index()` "invalidates FTS cache" and merges into the current engine. If the `EnginePool` dynamically merges indexes per request based on the `indexes` parameter, it will constantly trigger FTS rebuilds and destroy the ~50ms latency. 
-*   **Memory Footprint Assumption:** The existing `emb` library loads the entire index (entries + numpy embedding arrays) into memory, plus a 149M parameter ModernBERT model and a 0.6B parameter reranker. An `EnginePool` that lazy-loads but doesn't unload multiple distinct indexes will quickly blow up the RAM on a local machine, causing swap thrashing.
-*   **Thread Safety:** The `emb` API notes explicitly state: *"Not thread-safe by default for embedding model"*. FastMCP handles requests asynchronously. If the agent fires off parallel searches (e.g., searching 3 different indexes simultaneously), the underlying embedding model will likely crash or block unpredictably.
+Claude conflates **current state** with **evolutionary context**. 
+
+Claude argued that `MEMORY.md`, `improvement-log.md`, and `CLAUDE.md` are richer than git history because they are topic-organized and contain detailed context. This is true for *execution*—an agent needs the current rules to act. But it is entirely false for *self-optimization*.
+
+When `MEMORY.md` is mutated, the *reason* for the mutation replaces the previous state. If an agent deletes a rule, the rule and the context of its existence are gone from the file. If the agent later encounters the same failure mode, it has no way to know it already tried and rejected a specific rule unless it scans gigabytes of ephemeral `~/.claude/projects/*/UUID.jsonl` transcripts.
+
+Git diffs capture the exact delta, but without structured commit messages, the *intent* behind the delta is lost. Claude's current 1-2 sentence commits (e.g., `11b4a16 Reject heuristic gate findings`) are better than nothing, but they lack the systematic linkage back to the session or specific failure mode that prompted the change. Claude assumes it can perfectly remember its own architectural trajectory by looking at the current snapshot of its rules. This contradicts the very evidence base in `meta`'s `CLAUDE.md`: *simpler beats complex under stress, and documentation (+19 pts) prevents degradation.* Git history *is* the documentation of the agent's thought process over time.
 
 ## 2. What Was Missed
 
-*   **Provenance Truncation:** The `emb` search returns text truncated to 300 characters. The Constitution mandates: *"Every Claim Sourced and Graded"*. A raw 300-character middle-slice of a document might strip the source grade (e.g., `[A1]`, `[DATA]`) located at the top or bottom of the file. The MCP must guarantee that index name, original file source, and any metadata/grades are explicitly appended to the snippet payload.
-*   **Query Expansion / Contextualization:** The architecture research notes that `emb` already implements Anthropic's contextual retrieval (`emb contextualize`). But the MCP plan doesn't expose whether it searches the raw chunks or the contextualized chunks.
-*   **Error Handling for Missing Indexes:** The plan relies on `mtime` for cache invalidation. It misses the scenario where an index is deleted or corrupted by an external `emb` CLI process while the MCP is running.
+**Token-Efficient Archaeology:**
+Neither you nor Claude considered the context window economy of debugging regressions. If a self-modification loop degrades performance, finding the root cause by reading full historical `MEMORY.md` states or parsing raw transcripts is massively token-expensive. A structured `git log` acts as a high-density, low-token index. An agent can read 100 structured commit messages for a fraction of the token cost of reading two session transcripts, allowing it to rapidly pinpoint when and why a behavior changed.
 
-## 3. MCP vs Skill vs Subagent
+**Granularity Mismatch and Rollback Paralysis:**
+Look at the actual git history from 2026-02-28. Five commits happened in two minutes (11:57-11:59). The agent is mixing documentation (`d91f941 docs: add failure modes`), architectural theory (`0814a3f epistemic agent philosophy`), and code/rules on a flat `main` branch at blazing speed. If an infrastructure change breaks the agent, flat commits make a surgical `git revert` difficult because the agent's self-modifications are interleaved with standard feature work.
 
-*   **For Retrieval (`search`, `get_content`, `indexes`):** MCP is the exact right abstraction. MCP is designed to expose data systems to an LLM without polluting the LLM's system prompt with integration code. It treats the local embedding store as a standard database.
-*   **For Synthesis (`ask` / CAG):** MCP is the **wrong** abstraction. Calling an LLM (Gemini) from inside a tool used by another LLM (Claude) creates an opaque subagent. It violates Principle 7 ("The reasoning chain must show its sources"). The main agent gets a summarized narrative back and cannot verify the citations or source grades because the context was stuffed into Gemini, not Claude. 
-*   **Alternative:** Retrieval should be an MCP. Synthesis (if Gemini's 1M context is required for cost/size) should be a dedicated Subagent or a Claude Code Skill where the system prompt explicitly enforces the "Skeptical but Fair" and "Quantify Before Narrating" rules.
+**Cross-Repo Causal Links:**
+The agent operates across `intel`, `selve`, `meta`, and `skills`. If a rule change in `meta` dictates a pipeline change in `selve`, the flat, unstructured history makes it impossible to programmatically link those two events across repositories.
 
-## 4. Tool Granularity Assessment
+## 3. The Right Git Workflow
 
-Applying the existing ecosystem rule: *"Split a tool if there is a decision the agent should make between steps. Merge if the steps always execute together."*
+The user's proposal (heavy feature branches, `--no-ff` merges everywhere) is too heavy and violates the "Simpler beats complex" rule for the 2-minute micro-commits observed in the log. Claude's approach (unstructured flat commits) is too weak for long-term self-optimization. 
 
-*   **`indexes`**: Keep. The agent must decide what domain to target.
-*   **`search` vs `get_content`**: Keep split. This is correct. The agent reads 10 snippets and makes a deliberate decision about which 2-3 are worth spending context window tokens on to read in full.
-*   **`search` index targeting**: The plan asks if it should merge results across all indexes by default. **No.** Do not merge by default. Force the agent to select indexes. If you merge git commits, papers, and chat history by default, the reranker will struggle to compare semantic relevance across entirely different ontological domains.
-*   **`ask`**: Remove entirely from this MCP (see Section 6).
+**The Recommendation: Flat `main` with Mandatory Git Trailers.**
 
-## 5. Router Design
+1.  **Branching Strategy:** Flat on `main`. No feature branches or `--no-ff` merges for standard work. The agent's commit velocity (multiple per minute) makes branching an unnecessary token-tax and creates merge-conflict risks if the agent gets confused about its active tree.
+2.  **The Exception:** Branches are used *only* for high-risk self-modifications (e.g., rewriting `CLAUDE.md` core rules or updating the Exa MCP integration).
+3.  **Commit Format:** Keep the semantic first line, but mandate **Git Trailers** in the commit body. The agent has zero friction writing these, and they are natively parseable by `git log --format="%(trailers)"`.
 
-The heuristic router should be scrapped. 
+**Required Commit Structure:**
+```text
+<type>(<scope>): <concise description>
 
-The Constitution states: *"Instructions alone = 0% reliable. Prefer architectural enforcement."* If you want the agent to use the right search strategy, force it to declare its intent.
+<Optional 1-2 sentence context>
 
-Make `strategy` a required `Enum` parameter (`dense`, `bm25`, `hybrid`). Do not offer `auto`. 
-If the agent searches for a specific NPI number using `dense` and fails, it will receive an empty result, realize its error, and retry with `bm25`. This exercises the **Generative Principle** (maximizing error correction). An opaque heuristic router steals the agent's ability to learn how the database behaves and prevents it from executing precise, intentional queries.
+Session-ID: <UUID>
+Finding-ID: <Reference to improvement-log.md if applicable>
+Mutation-Target: <Code | Constitution | Memory | Tooling>
+Rollback-Safe: <Yes | No>
+```
 
-## 6. CAG Placement
+**Justification:** This satisfies the solo-dev/agent-assisted constraints. It requires no CI infrastructure, maintains the speed of pushing directly to `main`, but turns `git log` into a programmatic, highly queryable database for the agent's session-analyst pipeline.
 
-**CAG should NOT live in the Search MCP.**
+## 4. Where Structured Git Adds Unique Value (and where it doesn't)
 
-1.  **Dependency Bloat:** Adding `litellm`, Gemini API keys, and LLM orchestration to a fast, local, offline vector search server pollutes the operational boundary. Search MCP should only depend on `emb` and `fastmcp`.
-2.  **Epistemic Opacity:** If the agent uses `ask`, it delegates the synthesis to a cheaper, smaller model (Flash-Lite) without seeing the raw text. This violates "Falsify Before Recommending" and "Every Claim Sourced and Graded" because the primary reasoning engine (Claude) is taking a summary on blind faith.
-3.  **Refactoring:** Leave `cag.py` in `papers-mcp` for now. If cross-domain synthesis becomes a verified bottleneck, create a dedicated `synthesis-skill` that takes a list of document IDs, fetches them via Search MCP, and runs the Gemini call with strict prompt engineering aligned to the Constitution.
+**Where it adds unique value:**
+*   **Constitutional Evolution:** Tracking changes to `CLAUDE.md` and `MEMORY.md`. If the agent adds a rule (e.g., `e190dcb Add rule promotion criteria`), a structured commit with `Finding-ID` tells the agent *exactly* which session failure prompted this rule. If the rule later causes "sycophancy on heuristic rules" (as seen in `b305877`), the agent can trace the lineage of the failure.
+*   **Correlating Findings to Fixes:** The `improvement-log.md` tracks observed → proposed → implemented. A structured commit trailer allows the agent to definitively verify that a specific finding was actually implemented in the codebase without hallucinating or guessing based on timestamps.
 
-## 7. Constitutional Alignment
+**Where it DOES NOT add value:**
+*   **Day-to-day coding in `selve` or `intel`:** Standard data science or genomics code updates do not need heavy verifiable trailers unless they specifically address an agentic failure mode.
+*   **Branching/Merging for metadata's sake:** Grouping commits via `--no-ff` merge commits just to have a "summary" commit is a human-centric desire. The agent doesn't need visual grouping; it needs programmatic searchability (which Git Trailers provide perfectly).
 
-*   **Passes - "The Join Is the Moat":** Exposing all `emb` indexes to the agent allows cross-domain signal fusion (e.g., matching a DOJ press release index with an SEC filings index).
-*   **Passes - "Fast Feedback":** ~50ms local search provides immediate operational feedback to the agent's query formulations.
-*   **Violates - "The Autonomous Decision Test":** The heuristic `strategy="auto"` router makes decisions *for* the agent, making the agent less informed about why a query returned specific results.
-*   **Violates - "Honest About Provenance":** Returning truncated strings without hardcoding the injection of the source file, source grade, and index name into the `text` field will lead to unsourced assertions entering the entity files.
+## 5. The Hook Question
 
-## 8. What I'd Prioritize Differently
+The user's argument for branch/merge as hook targets is **speculative, fragile, and architecturally misaligned** with the available infrastructure.
 
-1.  **Remove `ask` and all CAG code:** Drop `litellm` and Gemini dependencies. Keep the MCP strictly focused on sub-100ms byte retrieval. *(Verification: `pyproject.toml` contains only `fastmcp` and `emb`)*.
-2.  **Make `strategy` explicitly required:** Delete `router.py`. Force the agent to choose `dense`, `bm25`, or `hybrid` in the tool schema. *(Verification: Tool call fails if `strategy` is omitted)*.
-3.  **Require explicit index selection:** Remove "search all" defaults. Force the agent to call `indexes` first, then pass specific index names to `search`. *(Verification: `indexes` parameter in `search` has no default, and `EnginePool` does not attempt to merge incompatible FTS tables)*.
-4.  **Enforce Provenance in Snippets:** Wrap the `emb` search return dict to prepend `[Index: {name} | Source: {source}]` to every 300-char text snippet. *(Verification: Every `search` result string explicitly contains its origin metadata)*.
-5.  **Implement LRU Cache & Thread Locking in EnginePool:** Protect the non-thread-safe embedding model with an `asyncio.Lock()`, and only keep the 2-3 most recently used indexes in memory to prevent RAM exhaustion. *(Verification: Concurrent search requests do not crash the script, RAM usage remains stable during multi-index queries)*.
+*   **The Reality of the Hooks:** Claude Code supports `WorktreeCreate`, `Stop`, `PreCompact`, `SessionEnd`, and `PreToolUse:Bash`. There are no native git pre-merge hooks.
+*   **The Implementation Nightmare:** To hook a merge, you would have to write a regex in `PreToolUse:Bash` to intercept `git merge` commands. This is incredibly brittle. If the agent types `git pull` (which merges), or `git rebase`, the hook might miss it or break the agent's flow.
+*   **The Simpler Alternative:** You don't need git lifecycle events to trigger automated reviews. Trigger the session-analyst review on the **`SessionEnd`** or **`PreCompact`** hooks. At the end of a session, the hook can easily run a script that does `git diff <start-of-session-sha>..HEAD` to evaluate all changes made during that session. This gives you the exact same batch-review capability without forcing an artificial branching strategy just to create a "merge" event.
 
-## 9. Blind Spots In My Own Analysis
+## 6. Blind Spots In My Own Analysis
 
-*   **M-Series Mac Unified Memory:** I am assuming RAM constraints based on standard local environments. If this is running on an M3 Max with 128GB of unified memory, holding 20 numpy arrays and the reranker in RAM simultaneously might be completely fine, making my LRU cache warning overly pedantic.
-*   **LLM Stubbornness:** I advocate forcing the agent to choose `strategy` manually. However, LLMs are notoriously lazy and might just default to `hybrid` for everything, wasting compute on reranking. The heuristic router *might* be a necessary evil to protect the system from the agent's own laziness.
-*   **CAG Pragmatism:** I am applying strict epistemic purity (Principle 7) to remove CAG. But if the actual daily workflow involves summarizing 40 long documents, removing `ask` might force the human to manually copy-paste IDs into a different tool, violating the goal of a "fully autonomous research pipeline." I may be over-weighting architectural purity over workflow convenience.
+*   **Underestimating Token Cost of Trailers:** While Git Trailers are dense, forcing the agent to fetch its current `Session-ID` or cross-reference the exact `Finding-ID` from `improvement-log.md` for *every* tiny commit might interrupt its flow or consume tool-use cycles just to look up the IDs.
+*   **Assuming Strict Trailer Adherence:** AI agents, even advanced ones like Claude 3.7/Code, frequently hallucinate structured metadata under long-context fatigue. It might invent `Finding-ID`s that don't exist in the `improvement-log.md`, polluting the git history with dead links.
+*   **The Value of Flat History:** I may be projecting human chronological analysis onto an agent that operates better holistically. If the agent's multi-model review synthesis (`1036c6b`) and constitutional deltas (`ece2a45`) are robust enough, perhaps it *never* actually needs to rollback or trace lineage. If the agent truly self-corrects based purely on current-state feedback loops, maintaining structured history might be a purely human psychological comfort mechanism with no real ROI for the agent's actual execution.
