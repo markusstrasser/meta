@@ -139,7 +139,8 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Global | Warns after 5 consecutive Bash failures |
 | `stop-research-gate.sh` | Stop | exit 2 | Intel | Blocks stop if research files lack source tags |
 | `precompact-log.sh` | PreCompact | exit 0 (async) | Global | Logs compaction events |
-| `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt |
+| `session-init.sh` | SessionStart | exit 0 | Global | Persists session ID to `.claude/current-session-id` |
+| `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt + recent commits |
 | `stop-notify.sh` | Stop | exit 0 | Global | macOS notification on idle |
 | `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global | Warns at 4/8 consecutive same-tool calls |
 | `userprompt-context-warn.sh` | UserPromptSubmit | exit 0 (warns) | Global | Detects continuation boilerplate |
