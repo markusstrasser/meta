@@ -132,10 +132,11 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | Hook | Event | Blocks? | Deployed where | What it does |
 |------|-------|---------|----------------|--------------|
 | `pretool-bash-loop-guard.sh` | PreToolUse:Bash | exit 2 | Global | Blocks multiline for/while/if (zsh parse error #1) |
+| *(inline)* bare-python-guard | PreToolUse:Bash | exit 2 | Global | Blocks bare `python`/`python3` without `uv run` |
 | `pretool-search-burst.sh` | PreToolUse:search tools | exit 0/2 | Global | Warns at 4, blocks at 8 consecutive searches |
 | `pretool-data-guard.sh` | PreToolUse:Write\|Edit | exit 2 | (available) | Blocks writes to protected paths |
 | `postwrite-source-check.sh` | PostToolUse:Write\|Edit | exit 2 | Intel | Blocks research writes without source tags |
-| `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Intel | Warns after 5 consecutive Bash failures |
+| `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Global | Warns after 5 consecutive Bash failures |
 | `stop-research-gate.sh` | Stop | exit 2 | Intel | Blocks stop if research files lack source tags |
 | `precompact-log.sh` | PreCompact | exit 0 (async) | Global | Logs compaction events |
 | `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt |
