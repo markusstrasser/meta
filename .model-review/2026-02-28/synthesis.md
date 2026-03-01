@@ -1,124 +1,86 @@
-# Cross-Model Review: Search MCP Design Plan
-**Mode:** Review (critical)
+## Cross-Model Review: Agent Skill Architecture
+**Mode:** Review
 **Date:** 2026-02-28
 **Models:** Gemini 3.1 Pro, GPT-5.2
 **Constitutional anchoring:** Yes (CONSTITUTION.md, GOALS.md)
 
-## Verified Findings (adopt)
+---
+
+### Verified Findings (adopt)
 
 | Finding | Source | Verified How |
 |---------|--------|-------------|
-| Router can't check corpus size but CAG routing needs it | GPT + Gemini | Confirmed: `classify_query(query: str)` has no index metadata; architecture doc uses corpus size for routing |
-| `add_index()` invalidates FTS cache — don't use for dynamic merging | Gemini | Confirmed: search.py:280 sets `self._fts_db = None` |
-| Cross-index scores not comparable if different embedding models used | GPT | Confirmed: no model enforcement in SearchEngine; merge warns but search doesn't |
-| No thread safety in SearchEngine | Gemini | Confirmed: no locks anywhere; shared `_embedding_model` instance |
-| Provenance fields insufficient for "Every Claim Sourced and Graded" | Both | Plan only mentions `source`; missing `index`, `doc_id`, `chunk_id`, `source_uri` |
-| CAG in v1 is negative EV unless ≥2 weekly synthesis workflows exist | Both | GPT: 8-20hr build, <20 calls/week → 3-6 week payback IF quality holds |
-| Merged ranking needs RRF, not global score sort | GPT | Correct: cosine similarities from different indexes are not on same scale even with same model |
+| ACH must be available to trade workflow, not locked in investigate | Gemini + GPT | CONSTITUTION.md P11: "Before any trade recommendation" — broader than fraud |
+| Source-grading scope is project-wide (P3), not investigate-only | Gemini | P3: "every claim that enters entity files or analysis docs" |
+| Change #7 (trade-thesis) is highest priority, not lowest | Gemini + GPT | GPT quantified: P9=10%, P11=35%, P12=5% coverage. Core mission gap. |
+| Change #6 (trim Exa section) must be conditional on #5 (hook) | GPT | Logically valid: removing guidance before enforcement exists worsens behavior |
+| Entity-management: add investment categories, don't delete bio | GPT | P8: "physiological signals where research-validated" |
+| 51% violation rate doesn't prove instruction is useless — no counterfactual | GPT | Valid: instruction may reduce from 90%→51%, not 0%→51% |
+| Prediction ledger is a missing constitutional artifact | GPT | P5 (Fast Feedback), P9 (Portfolio as Scorecard), GOALS.md (≥20 predictions/quarter) |
+| Trade tickets need a linter/hook, not just a skill | GPT | "instructions alone = 0% reliable" applies to trade-thesis too |
 
-## Where I (Claude) Was Wrong
+### Where I (Claude) Was Wrong
 
 | My Original Claim | Reality | Who Caught It |
 |-------------------|---------|--------------|
-| `search_all` merges results across indexes | Can't use `add_index()` for this — it invalidates FTS | Gemini |
-| Router heuristic selects CAG based on query intent | CAG decision actually needs corpus size, not just query text | GPT + Gemini |
-| 4 tools (search, get_content, indexes, ask) | `ask` should be deferred — adds complexity for unproven use case | Both |
-| `strategy="auto"` with heuristic router | Heuristic has systematic edge case failures (quoted+synthesis, IDs in questions) | GPT enumerated 5 failure patterns |
+| "Inline source-grading into investigate" | P3 mandates grading for ALL entity files and analysis, not just investigation. Inlining isolates epistemics to secondary mission. | Gemini |
+| "Inline competing-hypotheses into investigate Phase 4" | ACH is constitutionally required for trade recommendations (P11), not just fraud leads. Burying it in investigate breaks the primary mission workflow. | Gemini + GPT |
+| "Change #7 defer?" | This is the highest-impact change. P9/P11/P12 are the least-covered principles and most central to the generative principle. | Gemini + GPT |
+| "Update entity-management: remove genes/drugs" | P8 explicitly values multi-domain signals including physiological. Add investment categories, keep bio as secondary. | GPT |
+| "Trim researcher Exa section" as independent action | Must be conditional on Exa hook deployment. Standalone removal worsens behavior. | GPT |
 
-## Gemini Errors (distrust)
+### Gemini Errors (distrust)
 
-| Claim | Why Wrong/Overstated |
-|-------|---------------------|
-| "Make `strategy` a required Enum, no `auto`" | Overly rigid. Auto with override + logging is pragmatically correct for a personal project. Gemini's own blind spot section acknowledges "LLMs might just default to hybrid for everything" — the router helps. |
-| "CAG violates Principle 7 (provenance)" | Technically true but overstated — papers-mcp already runs CAG and user accepts it. The real issue is whether non-paper CAG is needed NOW, not whether it's epistemically pure. |
-| Temperature override warning (0.3 → 1.0) | Gemini 3.1 Pro locks temperature — expected; doesn't affect review quality. |
+| Claim | Why Wrong |
+|-------|-----------|
+| "Claude Code cannot natively spawn independent Gemini/GPT agents via Task tools" | Partially wrong. Task tool agents are Claude, but they can call llmx internally. The competing-hypotheses skill itself says "If multi-model dispatch isn't available, same-model agents still have value." Architecture works indirectly. |
+| "Create a dedicated Python script for sequential Exa, removing direct API access" | Over-engineered. Would require an MCP server wrapper or tool replacement. A stateful PreToolUse hook (tracking calls via $PPID temp file) is simpler and doesn't break existing MCP architecture. |
+| "Rename source-grading to epistemics-finance and expand" | Scope creep. The Admiralty system IS domain-agnostic — that's its strength. Adding SEC-specific source types is fine but doesn't justify a full skill rename and expansion. |
+| "Rewrite epistemics for the Financial Domain" | P8 says "physiological signals where research-validated." Purging bio epistemics would violate this. The investment research domain's epistemics are already in the Constitution (P2-4, P7, P11). A financial-epistemics skill would largely duplicate constitutional text. |
+| "Build a dataset-joiner orchestration skill" | Interesting idea but over-scoped. Entity resolution is ad-hoc and domain-specific. A skill template for DuckDB joins would be low-reuse. |
+| Temperature override (0.3 → 1.0) | Gemini 3.1 Pro locks temperature server-side — expected. Noted in model-review skill already. |
 
-## GPT Errors (distrust)
+### GPT Errors (distrust)
 
-| Claim | Why Wrong/Overstated |
-|-------|---------------------|
-| "Add `search(mode='pros_and_cons')`" and "`search(intent='disconfirm')`" | Scope creep. This is retrieval, not reasoning. The agent handles disconfirmation logic. |
-| "Add `indexes_manifest.json` with build timestamps, source snapshots, embedding model version" | Over-engineering for personal project. Index metadata already contains this info. |
-| "`search(diversity=True)` to reduce cherry-picking" | Nice idea but not a v1 concern. MMR or diversity reranking is a separate feature. |
-| Usage estimates (30-100 searches/day) | Fabricated — no data on actual usage patterns yet. |
+| Claim | Why Wrong |
+|-------|-----------|
+| "Coverage score P7 (Honest About Provenance) = 80%" | Likely overestimate. Dual provenance schema (Admiralty vs researcher tags) creates real ambiguity. Without enforcement hooks, actual compliance in outputs is probably lower. |
+| "Effort: 12-30 hours for trade-thesis skill" | Likely underestimate for the full ticket system with linter + Kelly script. But reasonable for a minimal skill without architectural enforcement. |
+| "Archived = possibly still accessible internally" | Incorrect for Claude Code skills. Archived skills in archive/ subdirectory are not symlinked and not loaded. The broken reference is real. |
+| "Unify provenance into a single canonical claim object schema with renderers" | Over-engineered. Two schemas serve different contexts (investigation vs general research). Clarifying when each applies is simpler than building a unified data model. |
 
-## Revised Plan
+### Revised Priority List
 
-### Scope: v1 = 3 tools, no CAG
+Based on both reviews, constitutional alignment, and fact-checking:
 
-| Tool | Keep/Cut | Rationale |
-|------|----------|-----------|
-| `search` | **Keep** | Core value. Primary reason to build this. |
-| `get_content` | **Keep** | Agent decision point between search and full read. |
-| `indexes` | **Keep** | Discovery before search. |
-| `ask` (CAG) | **Cut from v1** | Both models agree: unproven use case, high complexity. Re-add when ≥2 weekly synthesis workflows exist for non-paper content. |
+1. **Build trade-thesis skill + ticket linter (was #7, now #1)**
+   - Why: P9=10%, P11=35%, P12=5%. Largest constitutional gap. Primary mission enabler.
+   - Scope: trade ticket template + required fields + pre-commit linter + Kelly sizing script
+   - Testable: ≥95% of trade proposals include thesis/falsification/sizing/exits
 
-### Architecture Changes
+2. **Unarchive competing-hypotheses as standalone (was #2, approach changed)**
+   - Why: ACH is needed for BOTH trade theses (P11) and fraud investigation. Inlining into investigate would restrict it.
+   - Change: Unarchive, keep standalone, make available to both investigate and trade-thesis workflows.
 
-1. **Per-index search, RRF fusion (not `add_index()` merging):**
-   - Each index gets its own SearchEngine instance
-   - Multi-index search: query each separately, fuse with RRF
-   - Avoids FTS cache invalidation entirely
+3. **Keep source-grading standalone (was #1, approach reversed)**
+   - Why: P3 mandates grading for ALL entity files and analysis docs. Standalone keeps it universally available.
+   - Change: Keep as-is. Add 3-line quick-reference in entity-management. Clarify researcher's "don't mix" language.
 
-2. **Router gets index metadata:**
-   ```python
-   def classify_query(query: str, corpus_tokens: int | None = None) -> str:
-   ```
-   - Still heuristic, but corpus-aware
-   - Agent can override with `strategy=` parameter
+4. **Build prediction ledger (NEW — GPT recommendation)**
+   - Why: P5 (Fast Feedback), P9 (Portfolio as Scorecard), GOALS.md (≥20 predictions/quarter, calibration curve).
+   - Scope: predictions.csv schema + resolver job
+   - Testable: ≥20 predictions/quarter with deadlines and resolution tracking
 
-3. **Thread safety:**
-   - `asyncio.Lock()` per SearchEngine instance for `_encode_query()`
-   - Or: share one embedding model across all engines with a global lock
+5. **Build Exa throttle hook (was #5, keep)**
+   - Why: 51% violation rate. Sequential evidence incorporation is structurally important.
+   - Change: Stateful PreToolUse hook tracking Exa calls per turn via $PPID. Do NOT trim researcher Exa section until hook proves effective.
 
-4. **Structured provenance in results:**
-   ```python
-   {
-       "id": str,
-       "index": str,          # which index this came from
-       "source": str,
-       "title": str,
-       "date": str,
-       "text": str,           # truncated
-       "score": float,        # RRF-fused rank score
-       "metadata": dict,
-   }
-   ```
+6. **Entity-management: add investment categories, keep bio (was #4, approach changed)**
+   - Change: Add companies/, people/, contracts/, filings/ as primary. Keep genes/, drugs/ as secondary (P8).
 
-5. **Multiple index directories:**
-   - `SEARCH_INDEX_DIR` as colon-separated paths
-   - No forced convention; discover from wherever indexes already live
+7. **Trim goals to drift-detection focus (was #3, keep as lowest priority)**
+   - Lowest priority because disable-model-invocation means no context cost. Still worth doing for usability.
 
-6. **Query + response logging:**
-   - Log `(timestamp, query, strategy_chosen, indexes_searched, latency_ms, result_count)`
-   - Enable offline eval later without building a full harness now
+### Dropped Changes
 
-### Implementation Order (revised)
-
-1. `engine.py` — EnginePool with per-index SearchEngine, mtime invalidation, asyncio.Lock
-2. `server.py` — FastMCP with `search` (RRF cross-index) + `indexes`
-3. `get_content` tool
-4. `router.py` — corpus-aware heuristic with `strategy=auto|dense|bm25|hybrid`
-5. Query logging
-6. Tests (router classification, search integration, thread safety)
-7. Wire into `.mcp.json` for intel and selve
-
-### Dependencies (simplified)
-
-```toml
-[project]
-dependencies = [
-    "fastmcp>=2.0",
-    "emb",
-]
-# No litellm — CAG deferred
-```
-
-### Open Questions Resolved
-
-| Question | Decision | Reasoning |
-|----------|----------|-----------|
-| Merge across indexes by default? | Yes, but RRF fusion not score sort | GPT: RRF is robust; include `index` field so agent can filter |
-| Router configurable per-index? | Yes, minimal hints in metadata | `{preferred_strategy, supports_rerank}` |
-| CAG in v1? | No | Both models agree; defer until concrete weekly use case |
-| Index directory convention? | Colon-separated `SEARCH_INDEX_DIR` | GPT: don't force migration; support multiple dirs |
+- **#6 (Trim researcher Exa section):** Conditional on #5. Do not trim until hook proves effective (measure burst rate before/after).
