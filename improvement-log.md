@@ -90,3 +90,20 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
 - **Proposed fix:** [rule clarification] The branch workflow instruction ("commit changes") and the global "never commit unless asked" are in tension. Resolve: branch workflow implicitly authorizes commits when user requests branch-based implementation.
 - **Severity:** low (commits were well-structured and appropriate for branch workflow)
 - **Status:** [x] implemented — clarified in global CLAUDE.md: branch workflow implicitly authorizes commits (2026-02-28)
+
+### [2026-02-28] Supervision Audit
+- **Period:** 1 day, 68 sessions, 348 user messages
+- **Wasted:** 21.0% (target: <15%)
+- **Top patterns:**
+  1. **context-exhaustion (45):** User pasting "This session is being continued from a previous conversation that ran out of context" boilerplate. 33 in intel, 10 in selve, 3 in meta. The existing checkpoint.md + PreCompact hook generates the checkpoint, and CLAUDE.md tells the agent to read it, but the user still manually pastes continuation summaries. Root cause: no mechanism auto-injects checkpoint context at session start.
+  2. **commit-boilerplate (12):** User pasting "IFF everything works: git commit..." block across 10 sessions. All rules already exist in global CLAUDE.md. Trust problem, not tooling problem — but a `/commit` command alias or explicit "when user says 'commit', follow CLAUDE.md commit rules" could reduce friction.
+  3. **context-resume (4):** "Continue from where you left off" — overlaps with context-exhaustion.
+  4. **rubber-stamp (6):** "ok", "do it", "go" — natural approvals, not clearly automatable without removing intentional oversight.
+  5. **corrections (6 unique):** idempotency-check (2), completeness-verify (1), depth-nudge (1), env-uv-not-conda (1), capability-nudge (1) — below recurrence threshold, noise not signal.
+- **Per-project:** intel 28.9%, selve 26.9%, meta 12.8%
+- **Gemini synthesis:** Proposed SessionStart hook + commit skill. SessionStart hook is architecturally sound but SessionStart events can't inject prompt content (command-only). Commit skill is overkill given existing CLAUDE.md rules.
+- **Fixes implemented:**
+  1. [ARCHITECTURAL] UserPromptSubmit hook (`userprompt-context-warn.sh`) detects continuation boilerplate, warns user if checkpoint.md exists. Non-blocking. Deployed globally.
+  2. [RULE] Strengthened CLAUDE.md Context Continuations instruction: agent infers task from git state, doesn't ask user for context.
+  3. [RULE] Added "when user says 'commit', follow these rules" line to CLAUDE.md Git Commits section.
+- **Status:** [x] implemented (2026-02-28)

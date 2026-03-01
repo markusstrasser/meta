@@ -74,6 +74,7 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt to `session-receipts.jsonl` |
 | `stop-notify.sh` | Stop | exit 0 | Global (`~/.claude/hooks/`) | macOS notification on idle. Toggle via `cockpit.conf` |
 | `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global (`~/.claude/hooks/`) | Warns at 4/8 consecutive same-tool calls |
+| `userprompt-context-warn.sh` | UserPromptSubmit | exit 0 (warns) | Global | Detects continuation boilerplate, warns if checkpoint.md exists |
 | `add-mcp.sh` | (utility) | N/A | Manual | Adds MCP server presets to project `.mcp.json` |
 
 ### Hook design principles
