@@ -6,6 +6,12 @@
 
 Maximize autonomous agent capability across all projects while maintaining epistemic integrity. The system should learn things once and handle them forever — the human intervenes only for genuinely new information, creative direction, or goal-setting.
 
+## Generative Principle
+
+**Maximize the rate at which agents become more autonomous, measured by declining supervision — AND maximize error correction per session across all projects.**
+
+The deeper dynamic: the better the agent gets, the faster the human must rethink what they actually want next. This is an arms race — agent capability outpaces goal-setting until prediction quality is high enough that the agent can extrapolate what the human would want without asking. The endgame: wake up to 30 great ideas, say yes/no, go back to sleep.
+
 ## Primary Success Metric
 
 **Ratio of autonomous-to-supervised work across sub-projects.** Measured qualitatively: when reviewing a day's chat logs, there should be no:
@@ -22,6 +28,15 @@ The closer sessions get to "optimal run" (what would happen if the agent had per
 - **Wasted supervision rate** — % of human turns that are corrections, boilerplate, or rubber stamps. Currently ~21%. No numeric target, but qualitative trend should be downward.
 - **Agent reliability** — % of tasks completed correctly without correction.
 - **Time-to-capability** — how fast a new project gets proper agent infrastructure.
+
+## Self-Modification Boundaries
+
+**Full autonomy within invariants**, with a gradient:
+- **Clear improvement, one obvious path** → just do it, commit, move on
+- **Multiple valid solutions, could change a lot** → propose and wait for human review
+- **CONSTITUTION.md / GOALS.md** → always human-approved
+
+The invariants: CONSTITUTION.md and GOALS.md are human-owned. Everything else (CLAUDE.md, hooks, skills, maintenance checklists, rules, MEMORY.md) can be modified autonomously when the improvement is unambiguous.
 
 ## Strategy
 
@@ -44,11 +59,13 @@ The vision: any project can receive `/project-upgrade` or `/goals` and get meta'
 
 ## Research Cadence
 
-**Dynamic, not calendar-fixed.**
-- When improvements are steep and obvious: increase research frequency (weekly or more)
-- When diminishing returns hit: slow down until new research emerges
-- **Event-driven overlay**: new model ships → immediate sweep. New capability discovered → immediate evaluation.
-- Never fixed weekly — that's a commitment that degrades into checkbox behavior
+**First-class function, not every-session.** Research is divergent thinking — exploring what's new, what's possible, what others have solved. Implementation is convergent — building, testing, eating your own dogfood.
+
+The cycle: research (divergent) until diminishing returns → build (convergent) → use it → analyze whether it actually works → research again when stuck or when new information appears.
+
+- **Not calendar-driven.** No fixed weekly sweep that degrades into checkbox behavior.
+- **Opportunistic.** New model ships → immediate sweep. Stuck on a problem → search for prior art. Steep improvement curve → more research. Diminishing returns → more action.
+- **Action produces information.** At some point, building and using is more informative than reading papers.
 
 ## Projects Served
 
@@ -56,15 +73,23 @@ All projects: intel, selve, genomics, skills, papers-mcp, and any future repos. 
 
 Meta provides: shared skills, hooks, MCP servers, maintenance checklists, session analysis, observability, and the research pipeline. Any project should be able to install meta's toolkit and benefit.
 
-## Skills Relationship
+## Skills Ownership
 
-Skills (`~/Projects/skills/`) may merge into meta eventually — meta is the natural keeper of shared skills. For now, kept separate. Revisit when the boundary causes friction (e.g., propagation bugs, version drift, unclear ownership).
+**Meta owns skill quality.** Meta runs session analysis, sees when skills are applied across projects, and can judge whether they work. Claude Code knowledge is co-located here. The information flow is natural: session-analyst findings → skill improvements → propagation.
+
+Skills (`~/Projects/skills/`) may merge into meta as a directory. For now, kept separate. But quality governance (authoring standards, testing, versioning, cross-project propagation) lives in meta regardless of directory structure.
 
 ## Quality Standard
 
 Recurring patterns (used/encountered 10+ times) must become architecture — not instructions, not snippets, not manual habits. The Raycast-snippet heuristic: if you paste it 10 times, it should be a hook, a skill, or scaffolding.
 
 Qualitative reports from session-analyst are the primary feedback mechanism. No arbitrary numeric targets — the goal is "no stupid shit in the logs," judged by comparing actual runs against what an optimal run would look like.
+
+## Open Questions (dispatched to model-review)
+
+- **Enforcement granularity** — which principles deserve hooks vs. which stay instructional? Hooks can be annoying. Need empirical data from meta sessions. Progressive approach for now.
+- **Autonomy gradient threshold** — where exactly does "clear improvement" end and "multiple valid solutions" begin? Probably can't be defined precisely; needs examples over time.
+- **Skills merge timing** — meta owns quality but skills/ is still separate. When/whether to merge directories.
 
 ## Deferred Scope
 
@@ -90,4 +115,4 @@ This may never fully happen — meta encodes domain-specific and personal-idiosy
 
 ---
 
-*Created: 2026-02-28. Elicited via goals questionnaire.*
+*Created: 2026-02-28. Updated: 2026-02-28 (generative principle, self-modification boundaries, research philosophy, skills ownership). Elicited via goals + constitution questionnaire.*
