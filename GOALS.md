@@ -34,9 +34,9 @@ The closer sessions get to "optimal run" (what would happen if the agent had per
 **Full autonomy within invariants**, with a gradient:
 - **Clear improvement, one obvious path** → just do it, commit, move on
 - **Multiple valid solutions, could change a lot** → propose and wait for human review
-- **CONSTITUTION.md / GOALS.md** → always human-approved
+- **CLAUDE.md Constitution section / GOALS.md** → always human-approved
 
-The invariants: CONSTITUTION.md and GOALS.md are human-owned. Everything else (CLAUDE.md, hooks, skills, maintenance checklists, rules, MEMORY.md) can be modified autonomously when the improvement is unambiguous.
+The invariants: the Constitution section (in CLAUDE.md) and GOALS.md are human-owned. Everything else (rest of CLAUDE.md, hooks, skills, maintenance checklists, rules, MEMORY.md) can be modified autonomously when the improvement is unambiguous.
 
 ## Strategy
 
