@@ -13,6 +13,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 - `frontier-agentic-models.md` — research report on agentic model behavior (4 papers read in full)
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval, Groq/Gemini assessment, routing decision framework
 - `search-mcp-plan.md` — design plan for search MCP (emb wrapper + RRF fusion + routing), cross-model reviewed
+- `cockpit.md` — human-agent interface: status line, notifications, receipts, dashboard, ideas backlog
 
 ## Hard Rule
 **Changes must be testable.** If you can't describe how to verify an improvement, it's not an improvement. "Add a rule that says X" is not testable. "After this change, the agent will do Y instead of Z in scenario W" is testable.
@@ -70,7 +71,9 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | `posttool-bash-failure-loop.sh` | PostToolUse:Bash | exit 0 (warns) | Intel | Tracks consecutive Bash failures, warns after 5 |
 | `stop-research-gate.sh` | Stop | exit 2 | Intel | Blocks stop if research files lack source tags; checks `stop_hook_active` |
 | `precompact-log.sh` | PreCompact | exit 0 (async) | Global | Logs compaction events + modified files to `~/.claude/compact-log.jsonl` |
-| `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end events to `~/.claude/session-log.jsonl` |
+| `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt to `session-receipts.jsonl` |
+| `stop-notify.sh` | Stop | exit 0 | Global (`~/.claude/hooks/`) | macOS notification on idle. Toggle via `cockpit.conf` |
+| `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global (`~/.claude/hooks/`) | Warns at 4/8 consecutive same-tool calls |
 | `add-mcp.sh` | (utility) | N/A | Manual | Adds MCP server presets to project `.mcp.json` |
 
 ### Hook design principles
@@ -118,9 +121,25 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 - WorktreeCreate: stdout = worktree path; non-zero exit fails creation
 - PreCompact, SessionEnd, Notification, WorktreeRemove: no decision control
 
+## Cockpit (Human-Agent Interface)
+
+Status line, notifications, receipts, and dashboard. Full details in `cockpit.md`.
+
+| Component | Location | What |
+|-----------|----------|------|
+| Status line | `~/.claude/statusline.sh` | Model, branch, cost, context bar, `→ /compact` at >80% |
+| Config | `~/.claude/cockpit.conf` | `notifications=on\|off`, `cost_warning=2.00` |
+| Idle notification | `~/.claude/hooks/stop-notify.sh` | macOS notification when Claude finishes |
+| Spinning detector | `~/.claude/hooks/spinning-detector.sh` | Warns on 4+ consecutive same-tool calls |
+| Session receipt | `~/.claude/session-receipts.jsonl` | Cost, model, branch, context%, lines per session |
+| Dashboard | `meta/scripts/dashboard.py` | `uv run python3 scripts/dashboard.py [--days N]` |
+
+Note: `~/.claude/` files are not version-controlled. `cockpit.md` is the canonical reference.
+
 ## Session Forensics
 - Chat histories: `~/.claude/projects/-Users-alien-Projects-*/UUID.jsonl` (JSONL, one entry per message)
 - Compaction log: `~/.claude/compact-log.jsonl` (PreCompact hook, auto-logged)
 - Session log: `~/.claude/session-log.jsonl` (SessionEnd hook, auto-logged)
+- Session receipts: `~/.claude/session-receipts.jsonl` (SessionEnd hook, enriched with cost/model)
 - Error mining: Python script with `json.loads` per line, check `is_error`, `Exit code`, tool result content
 - Top error sources (Feb 2026): zsh multiline loops (178/wk), DuckDB column guessing (324/wk), llmx wrong flags (16/wk)
