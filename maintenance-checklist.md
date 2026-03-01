@@ -156,12 +156,34 @@ Reusable hook scripts symlinked into projects. All fail open (broken hook ≠ bl
 | `pretool-data-guard.sh` | PreToolUse | Generalized data file protection (configurable paths) |
 | `pretool-bash-loop-guard.sh` | PreToolUse | Blocks multiline for/while/if that causes zsh parse errors |
 | `posttool-bash-failure-loop.sh` | PostToolUse | Detects 5+ consecutive Bash failures, warns agent to stop retrying |
+| `pretool-commit-check.sh` | PreToolUse:Bash | Checks git commit messages: [prefix], no Co-Authored-By, governance trailers |
+| `pretool-search-burst.sh` | PreToolUse | Warns at 4, blocks at 8 consecutive searches |
 
-**Deployed to:** intel (postwrite-source-check.sh, posttool-bash-failure-loop.sh)
-**Not yet deployed:** selve (evaluate after intel trial)
+**Deployed to:** intel (postwrite-source-check.sh, posttool-bash-failure-loop.sh), global (commit-check, search-burst, bash-loop-guard)
+**Selve:** has its own prompt-type Stop hook for research quality (more sophisticated than shell version)
+
+## Shared Agents (`~/.claude/agents/`)
+User-level subagents with persistent memory. Created 2026-03-01.
+
+| Agent | Memory | Model | What it does |
+|-------|--------|-------|-------------|
+| `researcher.md` | user | inherit | Cross-session research with source memory + Stop prompt hook for citation checking |
+| `session-analyst.md` | user | sonnet | Transcript analysis with recurrence tracking + Stop agent hook for output quality |
+
+## Intel Agents (`intel/.claude/agents/`)
+Project-level subagents. Upgraded 2026-03-01 with frontmatter (memory, model, tools).
+
+| Agent | Memory | Model | What it does |
+|-------|--------|-------|-------------|
+| `entity-refresher.md` | project | sonnet | Refreshes entity files, remembers stale data sources |
+| `dataset-discoverer.md` | project | sonnet | Finds and assesses public datasets, remembers rejections |
+| `investment-reviewer.md` | project | sonnet | Adversarial thesis review with DuckDB access |
+| `sql-reviewer.md` | — | haiku | DuckDB SQL and Python review |
 
 ## Key Architecture Docs
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval decision framework, Groq/Gemini/Kimi assessment (2026-02-28)
+- `research/claude-code-native-vs-meta-infra.md` — What Claude Code native features can/cannot replace (2026-03-01)
+- `research/native-leverage-plan.md` — 5-phase plan for leveraging native features (2026-03-01)
 
 ## Ideas / Future Work
 

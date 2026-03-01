@@ -142,8 +142,23 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | `session-init.sh` | SessionStart | exit 0 | Global | Persists session ID to `.claude/current-session-id` |
 | `sessionend-log.sh` | SessionEnd | exit 0 (async) | Global | Logs session end + flight receipt + recent commits |
 | `stop-notify.sh` | Stop | exit 0 | Global | macOS notification on idle |
-| `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global | Warns at 4/8 consecutive same-tool calls |
+| `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global | Warns at 4/8 consecutive same-tool calls (uses additionalContext) |
 | `userprompt-context-warn.sh` | UserPromptSubmit | exit 0 (warns) | Global | Detects continuation boilerplate |
+| `pretool-commit-check.sh` | PreToolUse:Bash | exit 0/2 | Global | Checks git commits: [prefix], no Co-Authored-By, governance trailers |
+
+### Skill-Embedded Hooks (new pattern, 2026-03-01)
+| Skill | Event | Type | What it does |
+|-------|-------|------|-------------|
+| `researcher` | PostToolUse:Write\|Edit | prompt | Checks source citations on factual claims |
+
+### Intel-Only Hooks (in .claude/settings.json)
+| Hook | Event | What it does |
+|------|-------|-------------|
+| Large file guard | PreToolUse:Read | Advisory when file >256KB without offset/limit |
+| DuckDB dry-run | PostToolUse:Write\|Edit | Advisory when setup_duckdb.py or tools/datasets/ modified |
+| Backtest guard | PreToolUse:search tools | Blocks external queries during active backtests |
+| Data protection | PreToolUse:Write\|Edit | Blocks writes to datasets/, .parquet, intel.duckdb |
+| Secrets guard | PreToolUse:Write\|Edit | Blocks writes to .env, credentials, secrets files |
 
 ## Hook Design Principles
 - Deterministic > LLM-judged. Guard concrete invariants, not vibes.
