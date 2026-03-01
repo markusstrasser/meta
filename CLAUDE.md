@@ -3,8 +3,9 @@
 ## Purpose
 This repo plans and tracks improvements to agent infrastructure across projects (intel, selve, genomics, skills, papers-mcp). It's the "thinking about thinking" repo.
 
-## Communication
+<communication>
 Never start responses with positive adjectives. Skip flattery, respond directly. Find what's wrong first.
+</communication>
 
 ## Key Files
 - `GOALS.md` — what the system optimizes for (human-owned)
@@ -15,8 +16,7 @@ Never start responses with positive adjectives. Skip flattery, respond directly.
 - `search-retrieval-architecture.md` — CAG vs embedding retrieval, Groq/Gemini assessment, routing decision framework
 - `cockpit.md` — human-agent interface: status line, notifications, receipts, dashboard, ideas backlog
 
-## Constitution
-
+<constitution>
 > **Human-protected.** Agent may propose changes but must not modify without explicit approval.
 
 ### Generative Principle
@@ -91,6 +91,7 @@ How to verify this constitution is working (check via session-analyst after 2 we
 2. **Hooks fire on high-frequency failures.** Deployed hooks (bash-loop-guard, spinning-detector, failure-loop) should reduce repeated tool failures. Test: ≥50% reduction in ≥5-bash-failure-streaks vs pre-deployment baseline.
 3. **Research produces architecture, not documents.** Research sessions should result in hooks, skills, or code — not just memos. Test: ≥50% of research findings in improvement-log have "implemented" status within 30 days.
 4. **Model review surfaces disagreements.** When cross-model review disagrees with a stated preference, the synthesis explicitly flags it. Test: zero instances of silently overriding user preference in review artifacts.
+</constitution>
 
 ## Backlog
 
@@ -103,6 +104,7 @@ How to verify this constitution is working (check via session-analyst after 2 we
 - Not a place to document things that should be implemented. Plan here → implement in target repo in same session.
 - Architectural changes > documentation changes.
 
+<reference_data>
 ## Cross-Project Architecture
 | Layer | Location | Syncs how |
 |-------|----------|-----------|
@@ -141,7 +143,7 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 | `spinning-detector.sh` | PostToolUse | exit 0 (warns) | Global | Warns at 4/8 consecutive same-tool calls |
 | `userprompt-context-warn.sh` | UserPromptSubmit | exit 0 (warns) | Global | Detects continuation boilerplate |
 
-### Hook design principles
+## Hook Design Principles
 - Deterministic > LLM-judged. Guard concrete invariants, not vibes.
 - Fail open unless blocking is clearly worth it.
 - `trap 'exit 0' ERR` swallows `exit 2` from Python — disable trap before critical Python calls.
@@ -177,7 +179,9 @@ Scripts in `~/Projects/skills/hooks/`. Referenced by absolute path from settings
 - Stop, PostToolUse, SubagentStop, ConfigChange, UserPromptSubmit: JSON `decision: "block"`
 - TeammateIdle, TaskCompleted: exit code 2 blocks
 - PreCompact, SessionEnd, Notification, WorktreeRemove: no decision control
+</reference_data>
 
+<cockpit>
 ## Cockpit (Human-Agent Interface)
 
 Status line, notifications, receipts, and dashboard. Full details in `cockpit.md`.
@@ -187,9 +191,12 @@ Status line, notifications, receipts, and dashboard. Full details in `cockpit.md
 | Status line | `~/.claude/statusline.sh` | Model, branch, cost, context bar |
 | Config | `~/.claude/cockpit.conf` | `notifications=on\|off`, `cost_warning=2.00` |
 | Dashboard | `meta/scripts/dashboard.py` | `uv run python3 scripts/dashboard.py [--days N]` |
+</cockpit>
 
+<session_forensics>
 ## Session Forensics
 - Chat histories: `~/.claude/projects/-Users-alien-Projects-*/UUID.jsonl`
 - Compaction log: `~/.claude/compact-log.jsonl`
 - Session receipts: `~/.claude/session-receipts.jsonl`
 - Top error sources (Feb 2026): zsh multiline loops (178/wk), DuckDB column guessing (324/wk), llmx wrong flags (16/wk)
+</session_forensics>
