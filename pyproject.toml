@@ -1,0 +1,15 @@
+[project]
+name = "meta-mcp"
+version = "0.1.0"
+description = "Meta project knowledge base — hook designs, failure modes, architecture decisions"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.0",
+]
+
+[project.scripts]
+meta-mcp = "meta_mcp:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
