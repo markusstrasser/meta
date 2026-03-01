@@ -178,9 +178,9 @@ Every 15 minutes (cron):
   5. Log result, pick next task
 ```
 
-**MVP spec (from review-synthesis.md):** ~100 lines Python. Cron + SQLite + subprocess. No DAG, no diversity monitor, no Agent SDK (premature optimizations). Build it when paper trading demonstrates the system works manually.
+**MVP spec (from review-synthesis.md):** ~100 lines Python. Cron + SQLite + subprocess. No DAG, no diversity monitor, no Agent SDK (premature optimizations).
 
-**Blocked by:** Paper trading validation. Don't automate a system that hasn't proven it works with human oversight.
+**Status: UNBLOCKED.** The orchestrator is meta-level infrastructure, independent of any specific project's validation status. Build for tasks that are clearly automatable: research sweeps, self-improvement passes, entity refresh, data maintenance. (Decision: goals elicitation 2026-02-28)
 
 **Key design decisions (already validated by multi-model review):**
 - Fresh `claude -p` per task, NOT `--resume` (quadratic cost)
