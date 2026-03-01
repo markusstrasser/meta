@@ -107,3 +107,25 @@ Source: `/session-analyst` skill analyzing transcripts from `~/.claude/projects/
   2. [RULE] Strengthened CLAUDE.md Context Continuations instruction: agent infers task from git state, doesn't ask user for context.
   3. [RULE] Added "when user says 'commit', follow these rules" line to CLAUDE.md Git Commits section.
 - **Status:** [x] implemented (2026-02-28)
+
+### [2026-03-01] Supervision Audit
+- **Period:** 1 day, 88 sessions, 355 user messages
+- **Wasted:** 5.9% (target: <15%) -- down from 21.0% on 2026-02-28
+- **Classifier fixes deployed this audit:**
+  1. **context-continuation false positive.** Previous audit's 25 RE_ORIENT "context-exhaustion" messages were auto-continuation summaries injected by Claude Code, not human typing. Fixed: added SYSTEM classification for "session is being continued from a previous conversation". This alone dropped wasted% from 12.6% to 6.5%.
+  2. **idempotency-check false positive.** "already exists as dormant code" in user-pasted context triggered `already (have|download|exist)` regex. Tightened to `we already (have|download)`. Dropped 2 more false positives.
+- **Top remaining patterns (corrected):**
+  1. **commit-boilerplate (7):** Same clipboard paste as 2026-02-28. Rule exists in CLAUDE.md. User habit, not agent failure. 6 sessions, identical text. No new fix needed -- the 2026-02-28 CLAUDE.md rule addition is the right fix; user adoption is the bottleneck.
+  2. **rubber-stamp (7):** "ok", "do it", "go ahead" -- intentional approval checkpoints. Not automatable without removing oversight the user wants.
+  3. **context-resume (3):** "Continue from where you left off" -- checkpoint.md mechanism exists but user still types this. The 2026-02-28 UserPromptSubmit hook should be catching this. Possible: hook not deployed to all projects.
+  4. **corrections (4 unique):** completeness-verify (1), depth-nudge (1), env-uv-not-conda (1), capability-nudge (1). All singletons, noise not signal.
+- **Trend:** Wasted supervision 21.0% -> 5.9% in 2 days. ~60% of the drop is classifier accuracy (false positives removed), ~40% is genuine improvement from 2026-02-28 fixes (commit rule, context continuation rule, UserPromptSubmit hook).
+- **Gemini synthesis (cross-checked):**
+  - Proposed commit-boilerplate DEFAULT fix -- rejected, rule already exists (CLAUDE.md git_rules section).
+  - Proposed context-exhaustion ARCHITECTURAL fix -- moot, these were false positives in the classifier.
+  - Proposed build-failure SKILL and tool-error HOOK -- both from one selve/genomics session (a2679f18), not recurring. Below threshold.
+- **Fixes deployed:**
+  1. [CLASSIFIER] `extract_supervision.py`: Added SYSTEM classification for auto-continuation messages
+  2. [CLASSIFIER] `extract_supervision.py`: Tightened idempotency-check regex to avoid context-paste false positives
+- **No new automation fixes warranted.** At 5.9% wasted, the remaining patterns are either (a) user habits that rules already address, (b) intentional approval checkpoints, or (c) singletons below recurrence threshold. Further investment in automation has diminishing returns until new patterns emerge.
+- **Status:** [x] reviewed
