@@ -25,6 +25,10 @@ A session-analyst finding becomes a rule only if:
 3. **Is a simple, checkable format rule** (">10 lines → use a .py file") OR is architectural (hook, test, scaffold).
 Reject everything else. Over-prescription rots faster than under-prescription.
 
+## Backlog
+
+- [ ] **Cron/auto-update skill** — Cross-project skill: daily job that monitors new papers/tools/databases relevant to each project, then triggers selective re-runs. Genomics example: new ClinVar release → re-annotate triage variants. Intel example: new earnings data → re-run scanners. Should be a shared skill, not project-specific. (Source: genomics goals elicitation 2026-02-28)
+
 ## What This Repo Is NOT
 - Not a place to write more rules about rules. Instructions alone produce 0% reliable improvement (EoG, arXiv:2601.17915).
 - Not a place to document things that should be implemented. If you plan a change here, implement it in the target repo in the same session.
