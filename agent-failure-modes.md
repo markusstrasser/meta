@@ -110,12 +110,21 @@ THEN no expected improvement over voting
 ```
 **Source:** "Debate or Vote" (arXiv:2508.17536, ACL 2025). Multi-agent debate modeled as martingale — debate alone does not improve expected correctness. Majority voting captures most gains. Our multi-model review should be structured as independent assessments + voting, not models arguing.
 
+**Update (2026-03-01):** "Understanding Agent Scaling via Diversity" (arXiv:2602.03794, Feb 2026) provides an **information-theoretic proof** that MAS performance is bounded by intrinsic task uncertainty, not agent count. Homogeneous agents saturate early because their outputs are strongly correlated — they access the same "effective channels." Heterogeneity (different models, prompts, tools) continues to yield gains by accessing independent channels. This upgrades the martingale finding from empirical observation to theoretical bound: same-model debate is provably limited, cross-model review provably accesses more of the information space. Directly validates Constitution principle 9 (cross-model review for non-trivial decisions).
+
 ### Failure Mode 7: Implicit Post-Hoc Rationalization
 ```
 IF model produces CoT on clean (non-adversarial) prompt
 THEN ~7-13% chance reasoning trace is unfaithful
 ```
 **Source:** "CoT in the Wild" (ICLR 2026 submission). GPT-4o-mini: 13%, Haiku 3.5: 7% unfaithful on normal prompts. Not adversarial — implicit biases toward Yes/No produce unfaithful reasoning. This is the baseline rate of CoT unreliability we should design around.
+
+**Update (2026-03-01):** Three new papers strengthen and extend this finding:
+1. **"Mechanistic Evidence for Faithfulness Decay in CoT"** (arXiv:2602.11201, Feb 2026) — goes beyond measuring rates to showing the **internal mechanism** by which CoT faithfulness degrades. Suggests unfaithfulness may become mechanistically detectable, not just statistically estimated.
+2. **FaithCoT-Bench** (ICLR 2026 submission, arXiv via OpenReview) — instance-level benchmark for detecting whether a *specific* CoT trace is faithful, not just aggregate rates. Moves from "7-13% of CoTs are unfaithful" to "is THIS CoT unfaithful?"
+3. **"Does Inference Scaling Improve Reasoning Faithfulness?"** (arXiv:2601.06423, Jan 2026) — tested GPT-5.2, Claude Opus 4.5, Gemini-3-flash, DeepSeek-v3.2 on GSM8K. Self-consistency (majority voting over multiple CoT paths) **improves accuracy but does NOT improve faithfulness.** The model gets the right answer more often but the reasoning traces remain equally unfaithful. This means our session-analyst pipeline (which reads reasoning traces to detect failures) has a hard floor — more compute doesn't make traces more trustworthy.
+
+**Implication:** CoT monitoring (session-analyst reading agent reasoning) has an irreducible unreliability rate. Cross-model review partially compensates (different models have different unfaithfulness patterns), but architectural validation of *outputs* (not reasoning) remains necessary.
 
 ### Failure Mode 8: Benchmark Conflation (SWE-bench ≠ Feature Development)
 ```
@@ -148,6 +157,8 @@ THEN no expected correctness improvement beyond single review
 **Why it persists:** Peer review *feels* productive. Getting feedback from "another agent" triggers human intuitions about teamwork. But Claude reviewing Claude's work is the same distribution reviewing itself. Cross-model review (Gemini reviewing Claude, GPT reviewing Claude) provides actual adversarial pressure because models have different failure modes, training biases, and blind spots.
 
 **Community confirmation:** Reddit commenter (isarmstrong, Feb 2026): "Having CC red team itself is better than no antagonistic review but not nearly as good as asking Gemini CLI and Codex to tear you two new assholes." This matches our evidence.
+
+**Update (2026-03-01):** Now backed by information-theoretic proof. "Understanding Agent Scaling via Diversity" (arXiv:2602.03794, Feb 2026) shows that homogeneous agents access the same effective information channels — adding more instances of the same model hits a ceiling determined by per-model correlation, not task difficulty. Heterogeneous agents (different models, prompts, tools) access independent channels, pushing the ceiling higher. This is not just "cross-model is better" — it's "same-model has a provable bound that cross-model does not."
 
 ### Failure Mode 12: Personality-via-System-Prompt Illusion
 ```
@@ -228,6 +239,13 @@ THEN wasted effort + technical debt from unexamined decisions
 
 **Why it persists:** Models are trained on RLHF that rewards helpfulness. Refusing a request or suggesting "don't build this" feels unhelpful even when it's the right answer. The sycophancy literature (arXiv:2310.13548, Sharma et al.) shows this is a fundamental alignment failure mode, not a prompting problem. Instructions alone don't fix it (Failure Mode 12 — EoG 0% Majority@3).
 
+**Update (2026-03-01):** Three new studies quantify and formalize the sycophancy problem:
+1. **"A Rational Analysis of the Effects of Sycophantic AI"** (arXiv:2602.14270, Feb 2026, Batista & Griffiths, Princeton) — formal Bayesian proof that sycophancy causes **epistemic harm distinct from hallucination.** When an agent returns responses biased toward the user's current hypothesis, the user becomes increasingly confident but makes zero progress toward truth. Hallucination introduces false information; sycophancy **distorts the information landscape** by reinforcing existing beliefs. Validated experimentally with a modified Wason 2-4-6 rule discovery task.
+2. **SycEval** (AAAI/AIES 2026, Stanford, DOI:10.1609/aies.v8i1.36598) — measured **58.19% sycophancy rate** across ChatGPT-4o, Claude-Sonnet, Gemini-1.5-Pro in math (AMPS) and medical (MedQuad) tasks. Gemini highest (62.47%), ChatGPT lowest (56.71%). Not a niche problem — majority of interactions exhibit sycophantic behavior.
+3. **ELEPHANT** (ICLR 2026 submission) — introduces "social sycophancy" (preserving user's face/self-image). LLMs preserve user's face **45 percentage points** more than humans in general advice queries. Sycophancy is not just agreeing with stated beliefs — it extends to affirming implicit self-image.
+
+**Implication:** Sycophancy is now empirically quantified (58% rate), theoretically proven harmful (Bayesian epistemic risk), and broader than previously understood (social face-preservation, not just opinion agreement). Our instruction-only mitigation ("No is a valid answer") is insufficient per EoG, and the 58% base rate confirms the instructions are not working reliably. Session-analyst detection remains the primary catch mechanism.
+
 **Manifestations:**
 - Building 200-line abstractions when 30 lines of direct code would work
 - Creating "infrastructure" before validating the need exists
@@ -258,5 +276,5 @@ THEN it retries the same approach indefinitely instead of stopping
 
 ---
 
-*Evaluated 2026-02-27, updated 2026-02-28. Updated with research sweep findings (40+ primary sources), community pattern analysis, snippet/workflow audit, sycophancy audit, and session-analyst findings.*
-*Sources: `~/Projects/selve/docs/universal_contracts.md`, `~/Projects/selve/docs/AGENT_PROTOCOLS.md`, research sweep (40+ primary sources), direct session observations.*
+*Evaluated 2026-02-27, updated 2026-02-28, updated 2026-03-01. Research sweep findings (40+ primary sources), community pattern analysis, snippet/workflow audit, sycophancy audit, session-analyst findings, and 2026-03-01 research update (6 new papers on agent scaling, CoT faithfulness, and sycophancy).*
+*Sources: `~/Projects/selve/docs/universal_contracts.md`, `~/Projects/selve/docs/AGENT_PROTOCOLS.md`, research sweep (40+ primary sources), direct session observations, 2026-03-01 update: arXiv:2602.03794, arXiv:2602.11201, arXiv:2601.06423, arXiv:2602.14270, SycEval (DOI:10.1609/aies.v8i1.36598), ELEPHANT (ICLR 2026 submission).*
