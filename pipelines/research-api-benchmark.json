@@ -1,39 +1,39 @@
 {
   "name": "research-api-benchmark",
   "project": "research",
-  "description": "Run the same genomics research prompt with 3 different tool strategies to compare API quality. Each step writes to a separate output file. Final step synthesizes.",
+  "description": "Run the same genomics research prompt with 3 different tool strategies to compare API quality. Lite version: 10 turns each, ~$10 total.",
   "steps": [
     {
       "step": "strategy-academic",
       "prompt": "You are benchmarking research API quality. Use ONLY academic database tools (Semantic Scholar, PubMed, arXiv, bioRxiv). Do NOT use web search, Exa, Brave, or Perplexity.\n\nWrite your full research output to benchmarks/output-academic.md.\n\nResearch the clinical significance of a heterozygous EBF3 p.Pro263Leu missense variant (ClinVar VUS) found in whole-genome sequencing of a healthy adult male.\n\nContext: This variant survived 4-agent verification as the sole TIER-1 finding from 365 rare HIGH/MODERATE variants in a personal WGS analysis. The gene has pLI=1.0, LOEUF=0.353, ClinGen Definitive for HADDS (Hypotonia, Ataxia, and Delayed Development Syndrome, OMIM #617330). Six deep-learning pathogenicity predictors concordantly score it as damaging. However, HADDS is caused by heterozygous loss-of-function — the question is whether this specific missense variant causes haploinsufficiency or is tolerated.\n\nResearch axes:\n1. Variant-level evidence: Does p.Pro263Leu (or any missense at position 263) appear in ClinVar, LOVD, HGMD, or published case reports? Conservation? Functional domain?\n2. Gene-level missense constraint: EBF3 missense Z-score? Documented HADDS cases from missense (not LoF)? Domain clustering?\n3. Functional data: MAVE/DMS in MaveDB? Cell-based or animal model assays? Pro->Leu structural effects on HLH transcription factors?\n4. Phenotype correlation: Expected penetrance of pathogenic EBF3 variants? Adult carriers with subclinical phenotypes?\n\nDisconfirmation: Search for evidence EBF3 missense variants are generally tolerated, Pro263 is not conserved, or HADDS has no adult-onset form.\n\nOutput: Claims table with evidence grades (A1>A2>B2>B3>C3>C4>D4>E5>F6), domain map if findable, recommendation.",
-      "max_turns": 20,
-      "max_budget_usd": 5.0,
+      "max_turns": 10,
+      "max_budget_usd": 2.5,
       "effort": "high",
       "allowed_tools": "Read,Write,Glob,Grep,mcp__research__search_papers,mcp__research__save_paper,mcp__research__fetch_paper,mcp__research__read_paper,mcp__research__get_paper,mcp__research__list_corpus,mcp__research__verify_claim,mcp__paper-search__search_arxiv,mcp__paper-search__search_pubmed,mcp__paper-search__search_biorxiv,mcp__paper-search__search_google_scholar,mcp__paper-search__read_arxiv_paper"
     },
     {
       "step": "strategy-websearch",
       "prompt": "You are benchmarking research API quality. Use ONLY web search tools (Perplexity, Brave, Exa web search). Do NOT use Semantic Scholar, PubMed, arXiv, or paper-search tools.\n\nWrite your full research output to benchmarks/output-websearch.md.\n\nResearch the clinical significance of a heterozygous EBF3 p.Pro263Leu missense variant (ClinVar VUS) found in whole-genome sequencing of a healthy adult male.\n\nContext: This variant survived 4-agent verification as the sole TIER-1 finding from 365 rare HIGH/MODERATE variants in a personal WGS analysis. The gene has pLI=1.0, LOEUF=0.353, ClinGen Definitive for HADDS (Hypotonia, Ataxia, and Delayed Development Syndrome, OMIM #617330). Six deep-learning pathogenicity predictors concordantly score it as damaging. However, HADDS is caused by heterozygous loss-of-function — the question is whether this specific missense variant causes haploinsufficiency or is tolerated.\n\nResearch axes:\n1. Variant-level evidence: Does p.Pro263Leu (or any missense at position 263) appear in ClinVar, LOVD, HGMD, or published case reports? Conservation? Functional domain?\n2. Gene-level missense constraint: EBF3 missense Z-score? Documented HADDS cases from missense (not LoF)? Domain clustering?\n3. Functional data: MAVE/DMS in MaveDB? Cell-based or animal model assays? Pro->Leu structural effects on HLH transcription factors?\n4. Phenotype correlation: Expected penetrance of pathogenic EBF3 variants? Adult carriers with subclinical phenotypes?\n\nDisconfirmation: Search for evidence EBF3 missense variants are generally tolerated, Pro263 is not conserved, or HADDS has no adult-onset form.\n\nOutput: Claims table with evidence grades (A1>A2>B2>B3>C3>C4>D4>E5>F6), domain map if findable, recommendation.",
-      "max_turns": 20,
-      "max_budget_usd": 5.0,
+      "max_turns": 10,
+      "max_budget_usd": 2.5,
       "effort": "high",
       "allowed_tools": "Read,Write,Glob,Grep,WebSearch,WebFetch,mcp__exa__web_search_exa,mcp__exa__web_search_advanced_exa,mcp__exa__crawling_exa,mcp__brave-search__brave_web_search,mcp__brave-search__brave_news_search,mcp__perplexity__perplexity_ask,mcp__perplexity__perplexity_search,mcp__perplexity__perplexity_research,mcp__perplexity__perplexity_reason"
     },
     {
       "step": "strategy-combined",
       "prompt": "You are benchmarking research API quality. Use ALL available research tools — academic databases AND web search. Use the researcher skill methodology: sequential exploration, save papers, fetch full text before citing, disconfirmation phase.\n\nWrite your full research output to benchmarks/output-combined.md.\n\nResearch the clinical significance of a heterozygous EBF3 p.Pro263Leu missense variant (ClinVar VUS) found in whole-genome sequencing of a healthy adult male.\n\nContext: This variant survived 4-agent verification as the sole TIER-1 finding from 365 rare HIGH/MODERATE variants in a personal WGS analysis. The gene has pLI=1.0, LOEUF=0.353, ClinGen Definitive for HADDS (Hypotonia, Ataxia, and Delayed Development Syndrome, OMIM #617330). Six deep-learning pathogenicity predictors concordantly score it as damaging. However, HADDS is caused by heterozygous loss-of-function — the question is whether this specific missense variant causes haploinsufficiency or is tolerated.\n\nResearch axes:\n1. Variant-level evidence: Does p.Pro263Leu (or any missense at position 263) appear in ClinVar, LOVD, HGMD, or published case reports? Conservation? Functional domain?\n2. Gene-level missense constraint: EBF3 missense Z-score? Documented HADDS cases from missense (not LoF)? Domain clustering?\n3. Functional data: MAVE/DMS in MaveDB? Cell-based or animal model assays? Pro->Leu structural effects on HLH transcription factors?\n4. Phenotype correlation: Expected penetrance of pathogenic EBF3 variants? Adult carriers with subclinical phenotypes?\n\nDisconfirmation: Search for evidence EBF3 missense variants are generally tolerated, Pro263 is not conserved, or HADDS has no adult-onset form.\n\nOutput: Claims table with evidence grades (A1>A2>B2>B3>C3>C4>D4>E5>F6), domain map if findable, recommendation.",
-      "max_turns": 25,
-      "max_budget_usd": 8.0,
+      "max_turns": 12,
+      "max_budget_usd": 3.0,
       "effort": "high",
       "allowed_tools": "Read,Write,Glob,Grep,WebSearch,WebFetch,mcp__research__search_papers,mcp__research__save_paper,mcp__research__fetch_paper,mcp__research__read_paper,mcp__research__get_paper,mcp__research__list_corpus,mcp__research__verify_claim,mcp__paper-search__search_arxiv,mcp__paper-search__search_pubmed,mcp__paper-search__search_biorxiv,mcp__paper-search__search_google_scholar,mcp__paper-search__read_arxiv_paper,mcp__exa__web_search_exa,mcp__exa__web_search_advanced_exa,mcp__exa__crawling_exa,mcp__brave-search__brave_web_search,mcp__brave-search__brave_news_search,mcp__perplexity__perplexity_ask,mcp__perplexity__perplexity_search,mcp__perplexity__perplexity_research,mcp__perplexity__perplexity_reason"
     },
     {
       "step": "compare",
       "prompt": "Read benchmarks/output-academic.md, benchmarks/output-websearch.md, and benchmarks/output-combined.md. Also read benchmarks/ebf3-research-prompt.md for the scoring rubric and expected ground truth.\n\nScore each strategy on the 5 criteria (factual accuracy 30%, coverage 25%, source quality 20%, null results 15%, actionability 10%). For factual accuracy, verify PMIDs mentioned in each output actually exist by searching for them. Check claims against each other — where strategies disagree, note which is correct.\n\nWrite the comparison to benchmarks/comparison-report.md with:\n1. Per-strategy scores (0-100)\n2. What each strategy found that others missed\n3. Where each strategy hallucinated or got wrong\n4. Recommendation for optimal research API routing",
-      "max_turns": 20,
-      "max_budget_usd": 5.0,
+      "max_turns": 10,
+      "max_budget_usd": 2.0,
       "effort": "high",
-      "model": "opus",
+      "model": "sonnet",
       "allowed_tools": "Read,Write,Glob,Grep,mcp__research__search_papers,mcp__research__verify_claim,mcp__exa__web_search_exa,mcp__brave-search__brave_web_search,mcp__perplexity__perplexity_ask"
     }
   ]
