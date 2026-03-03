@@ -1,6 +1,6 @@
 {
   "name": "research-api-benchmark",
-  "project": "research",
+  "project": "meta",
   "description": "Run the same genomics research prompt with 3 different tool strategies to compare API quality. Lite version: 10 turns each, ~$10 total.",
   "steps": [
     {
