@@ -1355,7 +1355,7 @@ Research conducted 2026-02-28. Evaluated CAG (Cache-Augmented Generation) vs emb
 
 ### CAG Implementation (`papers-mcp/src/research_mcp/cag.py`)
 - Stuffs full paper texts into Gemini's 1M context window
-- Auto-tiers: `gemini-2.5-flash-lite` for broad sweeps (>30 papers), `gemini-2.5-flash` for focused analysis
+- Auto-tiers: `gemini-3-flash-preview` for broad sweeps (>30 papers), `gemini-3-flash-preview` for focused analysis
 - ~930K usable tokens after reserving for prompt + output
 - Called via `mcp__research__ask_papers` in researcher skill
 
@@ -2476,13 +2476,13 @@ def create_mcp(
 
         Stuffs all paper texts into Gemini's context window (CAG — no chunking,
         no retrieval, just the full papers). Automatically selects model tier:
-        - gemini-2.5-flash-lite for large corpus (>30 papers, cheap)
-        - gemini-2.5-flash for focused queries (<=30 papers, more capable)
+        - gemini-3-flash-preview for large corpus (>30 papers, cheap)
+        - gemini-3-flash-preview for focused queries (<=30 papers, more capable)
 
         Args:
             question: Research question. Be specific for best results.
             paper_ids: Optional list of paper IDs to query. If None, uses all papers with text.
-            model: Override model (e.g. 'gemini-2.5-flash', 'gemini-2.5-flash-lite').
+            model: Override model (e.g. 'gemini-3-flash-preview', 'gemini-3-flash-preview').
         """
         db = ctx.lifespan_context["db"]
         papers = db.get_papers_with_text(paper_ids)
@@ -5914,7 +5914,7 @@ Verify the output is reasonable (<100KB, readable markdown).
 Use llmx to send compressed transcript to Gemini 3.1 Pro (1M context, cheap) with the analysis prompt:
 
 ```bash
-llmx -p google -m gemini-2.5-pro -f /tmp/session_analysis_input.md "$(cat <<'PROMPT'
+llmx -p google -m gemini-3.1-pro-preview -f /tmp/session_analysis_input.md "$(cat <<'PROMPT'
 You are analyzing Claude Code session transcripts for behavioral anti-patterns. For each session, identify:
 
 1. SYCOPHANCY: Did the agent build something without questioning whether it was the right approach? Look for: user requests complex feature → agent immediately starts building (no "do we need this?" or "simpler alternative?"). Distinguish genuine helpfulness from compliance.
