@@ -1,8 +1,20 @@
-# Biomedical Knowledge Graph — Implementation Plan
+# Biomedical Knowledge Graph — Implementation Plan (v2)
 
 > **Goal:** Unified queryable graph joining personal genomics (variants, phenotypes, PGx) with public biomedical databases (interactions, pathways, diseases, adverse events) + agent-maintained living edges from literature surveillance.
 >
 > **Key insight:** Dev cost ≈ 0. Filter on join quality and epistemic value, not effort.
+>
+> **v2 (2026-04-05):** Revised after cross-model review (Gemini 3.1 Pro + GPT-5.4). Key changes: no new graph engine (extend existing DuckDB + NetworkX), entity registry as Phase 0, staging layer for agent edges, dropped Reactome dump, fixed identifier assumptions and pair-count math. Review: `.model-review/2026-04-05-biomedical-knowledge-graph-plan-2ee406/`
+
+## Architecture Decision: Extend DuckDB + NetworkX (no new engine)
+
+**Why not Neo4j:** Over-engineered. JVM daemon, memory config, backup/restore, service lifecycle — all for <100K edges. Both review models flagged this as the #1 maintenance trap.
+
+**Why not Kùzu:** Gemini proposed this as Neo4j alternative (embedded, Cypher, pip install). But we already have DuckDB + NetworkX and it works. Adding Kùzu is solving a problem that doesn't exist. The PGx graph queries are 5-10 line NetworkX operations, not complex Cypher. The `pgx.py` PgxGraph class already handles upsert, mutation, traversal. Kùzu's maturity and DuckDB integration are also unverified.
+
+**What we do:** Extend `selve/indexed/pgx.duckdb` with new tables for each data source. Build the NetworkX DiGraph from all tables at query time (same pattern as today). DuckDB for storage + filtering, NetworkX for graph algorithms (sign propagation, shortest path, convergence detection, centrality).
+
+**Rejected:** `duckdb-pgq` extension (Property Graph Queries) — potentially interesting but immature, and NetworkX is already working.
 
 ## What Already Exists (don't rebuild)
 
@@ -25,237 +37,273 @@
 | Nutrient composition | `selve/scripts/usda_fdc.py` | REST (USDA FDC) | Dietary nutrient lookup |
 | Connectors pattern | `selve/scripts/connectors/` | Python scripts | fetch_kegg, fetch_signor, fetch_indra, seed_pgx_graph |
 
-## Architecture Decision: Neo4j + DuckDB (hybrid)
-
-**Neo4j Community Edition (local, `brew install neo4j`)** for the multi-source biomedical graph. Graph traversal queries (multi-hop paths, convergence detection, shortest-path-to-phenotype) are native Cypher, painful in SQL.
-
-**DuckDB stays** for variant lakehouse (columnar VCF queries) and structured analytics. No migration — different tools for different query shapes.
-
-**PGx graph migrates** from DuckDB→Neo4j as a subgraph. The signed-edge sign-propagation logic moves to Cypher (relationship properties). NetworkX stays available as a Python escape hatch via `neo4j` driver → NetworkX conversion for algorithms Neo4j doesn't support natively.
-
-**Join keys across all sources:**
-- **Gene:** HGNC symbol (universal). SIGNOR uses UniProt → map via HGNC. CTD uses gene symbols directly.
-- **Compound:** ChEBI ID preferred (CTD, SIGNOR both use it). UNII as fallback (DSLD uses it). Supplement common names as aliases.
-- **Phenotype:** HPO code (already structured in selve). MeSH as bridge to CTD/DisGeNET disease terms.
-- **Variant:** rsID (variant_registry already has 168).
-
 ---
 
-## Phase 1: Neo4j Setup + Personal Subgraph (day 1)
+## Phase 0: Entity Resolution Registry (prerequisite for all phases)
 
-### 1a. Install Neo4j Community Edition
+**Why this is Phase 0:** The cross-model review identified identifier alignment as the #1 risk. CTD uses MeSH chemical IDs. DisGeNET uses UMLS disease IDs. Open Targets uses EFO/Ensembl. DSLD uses UNII. Naive string matching ("ashwagandha") will drop >50% of valid edges.
 
-```bash
-brew install neo4j           # Community Edition, free, local
-neo4j start                  # runs on localhost:7474 (browser) + bolt://localhost:7687
+### 0a. Build entity registry
+
+Create `selve/config/entity_registry.json` mapping each supplement and gene to all relevant IDs:
+
+```json
+{
+  "compounds": {
+    "ashwagandha": {
+      "aliases": ["Withania somnifera", "KSM-66", "Sensoril"],
+      "chebi": "CHEBI:xxxxx",
+      "mesh": "D000000",
+      "unii": "xxxxxxxxxx",
+      "cas": "xxx-xx-x",
+      "ctd_chemical_id": "D000000"
+    }
+  },
+  "genes": {
+    "CYP2D6": {
+      "hgnc_symbol": "CYP2D6",
+      "ncbi_gene_id": 1565,
+      "uniprot": "P10635",
+      "ensembl": "ENSG00000100197"
+    }
+  },
+  "diseases": {
+    "insomnia": {
+      "hpo": "HP:0100785",
+      "mesh": "D007319",
+      "umls": "C0917801",
+      "mondo": "MONDO:0005271",
+      "efo": "EFO:0004698"
+    }
+  }
+}
 ```
 
-Config: `~/.neo4j/neo4j.conf` — set `server.memory.heap.max_size=2G`, `dbms.security.auth_enabled=false` (local only).
+### 0b. Populate via automated lookup
 
-### 1b. Load existing PGx graph into Neo4j
+Script: `selve/scripts/connectors/build_entity_registry.py`
+- For compounds: query PubChem by name → get CID → cross-refs to ChEBI, MeSH, UNII, CAS
+- For genes: HGNC REST API → NCBI, UniProt, Ensembl mappings
+- For diseases: query MONDO API or OLS (Ontology Lookup Service) → HPO, UMLS, MeSH, EFO mappings
 
-Script: `selve/scripts/connectors/load_pgx_to_neo4j.py`
+### 0c. Validation gate
 
-Read `pgx.duckdb` nodes + edges → Cypher `CREATE` statements. Preserve all existing properties (sign, weight, evidence, pmid, personal_genotype, activity_modifier).
-
-Node labels: `:Compound`, `:Gene`, `:Enzyme`, `:Metabolite`, `:Receptor`, `:Phenotype`, `:Variant`
-Edge types: `INTERACTS_WITH`, `METABOLIZES`, `PRODUCES`, `ACTIVATES`, `INHIBITS` (map from sign ±1)
-
-### 1c. Load personal variants + phenotypes
-
-- Import variant_registry.json (168 rsIDs) as `:Variant` nodes linked to `:Gene` nodes via `HAS_VARIANT`
-- Import HPO phenotype contracts as `:Phenotype` nodes with HPO codes
-- Import active-protocol supplements as `:Supplement` nodes (subset of `:Compound`)
-- Create `:Person {name: "self"}` node with edges to variants, phenotypes, supplements
-
-### 1d. Load SIGNOR (already cached)
-
-Read `signor_human.tsv` → create edges with sign, mechanism, PMID. 42K edges.
-Filter: keep chemical→protein, protein→protein, protein→phenotype. Skip complex/family-level.
-
-**Validation:** After Phase 1, the personal PGx graph should be queryable in Neo4j with same results as current DuckDB+NetworkX. Run the sign-propagation queries from `pgx.py` as Cypher and compare.
+All downstream loaders **reject entities not in the registry**. If CTD returns a compound not in `entity_registry.json`, it's skipped with a warning, not silently loaded. This prevents garbage edges.
 
 ---
 
-## Phase 2: CTD Integration (day 1-2)
+## Phase 1: CTD Integration (highest-value new data source)
 
-The highest-value new data source. 94M curated chemical→gene interactions.
+94M curated chemical→gene interactions. Filtered to personal subgraph.
 
-### 2a. Bulk download
+### 1a. Bulk download
 
-CTD downloads are CAPTCHA-protected. Two options:
-- **Manual download** (one-time): download `CTD_chem_gene_ixns.tsv.gz` from ctdbase.org/downloads
-- **Monthly refresh:** launchd plist that alerts user to re-download (CAPTCHA prevents full automation)
+CTD downloads are CAPTCHA-protected. Options:
+- **Manual download** (simplest): download `CTD_chem_gene_ixns.tsv.gz` from ctdbase.org/downloads
+- **Investigate alternatives:** Check if PubChem or BioGRID mirrors CTD interaction data without CAPTCHA
+- **Playwright automation:** If no mirror, script the CAPTCHA flow with headless browser
 
-### 2b. Filter & load
+Do NOT build a launchd alert for manual re-download — that violates the autonomy principle.
 
-Full CTD is 94M rows — too large. Filter to:
-1. Chemicals matching our 30 supplement compound names + their ChEBI IDs
-2. Genes in our variant_registry (168 genes) + PGx gene panel (20 genes)
-3. Expand 1-hop: genes connected to our compounds, compounds connected to our genes
+### 1b. Filter & load into DuckDB
 
-Expected filtered size: ~5K-50K edges (manageable).
+Full CTD is 94M rows. Filter to:
+1. Chemicals matching our 30 supplement compounds via `entity_registry.json` (using CTD's MeSH chemical IDs)
+2. Genes matching our variant-associated genes (map rsIDs → genes first — note: rsID→gene is many-to-many, gene count is NOT 168)
+3. 1-hop expansion: genes connected to our compounds, compounds connected to our genes
 
-Script: `selve/scripts/connectors/load_ctd.py`
+Load into `pgx.duckdb` as a `ctd_interactions` table with columns: `compound_mesh_id, gene_ncbi_id, interaction_type, pmid_count, source='CTD'`.
 
-### 2c. The killer join
+Expected filtered size: ~5K-50K edges.
 
-```cypher
-// Supplements that interact with YOUR variant-affected genes
-MATCH (s:Supplement)-[:CTD_INTERACTS]->(g:Gene)<-[:HAS_VARIANT]-(v:Variant)
-WHERE v.personal_genotype IS NOT NULL
-RETURN s.name, g.symbol, v.rsid, v.phenotype, g.activity_modifier
-ORDER BY s.name
-```
+### 1c. NetworkX integration
 
-This is the nutrigenomics interaction matrix — "your supplements hit your broken genes."
+Extend `pgx.py` to load CTD edges into the graph alongside SIGNOR/KEGG/INDRA edges. CTD edges get `evidence_class='curated_interaction'` to distinguish from causal edges (SIGNOR) and association edges (GWAS).
 
----
+### 1d. The join
 
-## Phase 3: Reactome Pathways (day 2)
-
-### 3a. Load Reactome Neo4j dump
-
-Reactome ships quarterly as a Neo4j dump. Download from reactome.org/download-data → "Graph Database" → `reactome.graphdb.dump`.
-
-Load directly: `neo4j-admin database load --from-path=reactome.graphdb.dump reactome`
-
-But: Reactome's Neo4j schema is complex (100+ node labels). Don't load the whole thing. Extract:
-- Pathway nodes (2,848)
-- Gene/protein→pathway membership edges
-- Pathway hierarchy (parent→child)
-
-Script: `selve/scripts/connectors/load_reactome.py` — reads the dump or uses Reactome Content Service REST API (https://reactome.org/ContentService/) to fetch pathway membership for our gene list.
-
-### 3b. Pathway convergence queries
-
-```cypher
-// Which supplements converge on the same pathway?
-MATCH (s1:Supplement)-[:CTD_INTERACTS]->(g1:Gene)-[:IN_PATHWAY]->(p:Pathway)
-      <-[:IN_PATHWAY]-(g2:Gene)<-[:CTD_INTERACTS]-(s2:Supplement)
-WHERE s1 <> s2 AND s1.name < s2.name  // avoid duplicates
-RETURN s1.name, s2.name, p.name, collect(DISTINCT g1.symbol) + collect(DISTINCT g2.symbol) AS genes
-ORDER BY size(genes) DESC
-```
-
-**Note:** `gene_pathway_mappings.json` (21MB, already in genomics) may be sufficient instead of loading full Reactome. Check if it has pathway IDs that can be resolved to names. If yes, skip the Reactome dump and just load this JSON.
-
----
-
-## Phase 4: OnSIDES + CAERS Adverse Events (day 2-3)
-
-### 4a. OnSIDES (replaces TWOSIDES + SIDER)
-
-Download v3.1.0 from GitHub (tatonetti-lab/onsides). CSV of drug→adverse_event from FDA labels.
-Filter to: our 2 drugs (tirzepatide, naltrexone) + any supplement compounds that appear.
-
-Load as `:AdverseEvent` nodes with `:CAUSES` edges from `:Compound`.
-
-### 4b. CAERS integration
-
-Already wired as live API (`openfda_caers.py`). Periodically pull and load report counts as edge properties on existing `:Supplement`→`:AdverseEvent` edges.
-
-### 4c. Combination risk surface
-
-```cypher
-// Compounds in your stack that share adverse event signals
-MATCH (c1:Compound)-[:CAUSES]->(ae:AdverseEvent)<-[:CAUSES]-(c2:Compound)
-WHERE c1.in_stack AND c2.in_stack AND c1 <> c2
-RETURN c1.name, c2.name, ae.name, ae.severity
-ORDER BY ae.severity DESC
+```python
+# Supplements that interact with your variant-affected genes
+def supplement_gene_interactions(graph, supplements, variant_genes):
+    """Return CTD interactions between stack compounds and personal variant genes."""
+    hits = []
+    for compound in supplements:
+        compound_id = entity_registry.resolve(compound, 'ctd_chemical_id')
+        for gene in variant_genes:
+            if graph.has_edge(compound_id, gene):
+                edge = graph[compound_id][gene]
+                hits.append({
+                    'supplement': compound,
+                    'gene': gene,
+                    'interaction': edge.get('interaction_type'),
+                    'evidence_class': edge.get('evidence_class'),
+                    'pmids': edge.get('pmid_count'),
+                })
+    return hits
 ```
 
 ---
 
-## Phase 5: DisGeNET Gene-Disease (day 3)
+## Phase 2: Pathway Convergence (using existing data)
 
-### 5a. Free academic API
+### 2a. Load gene_pathway_mappings.json into DuckDB
 
-DisGeNET v25.4 free tier: curated associations only (text-mined excluded). Good enough — curated is higher quality.
+The 21MB `gene_pathway_mappings.json` already exists in genomics. Load as `gene_pathways` table in `pgx.duckdb`.
 
-API: `https://www.disgenet.org/api/gda/gene/{gene_id}` (requires free academic API key registration).
+Do NOT load the Reactome Neo4j dump — 100+ node labels, schema mapping nightmare, marginal gain over existing JSON.
 
-Filter to our gene list (168 + PGx 20). Load as `:Disease` nodes with `:ASSOCIATED_WITH` edges from `:Gene`.
+### 2b. Pathway convergence query
 
-### 5b. Three-way diagnostic join
-
-```cypher
-// Diseases associated with your variant-affected genes + matching your phenotype
-MATCH (v:Variant)-[:IN_GENE]->(g:Gene)-[:ASSOCIATED_WITH]->(d:Disease)
-MATCH (self:Person)-[:HAS_PHENOTYPE]->(ph:Phenotype)
-WHERE v.personal_genotype IS NOT NULL
-  AND d.hpo_codes IS NOT NULL
-  AND ANY(code IN d.hpo_codes WHERE code IN [ph.hpo_id])
-RETURN g.symbol, v.rsid, d.name, d.score, collect(ph.label) AS matching_phenotypes
-ORDER BY d.score DESC
+```python
+def pathway_convergence(graph, supplements, gene_pathways):
+    """Find supplements that converge on the same biological pathway."""
+    # For each supplement, get its target genes (via CTD + SIGNOR)
+    supp_genes = {s: set(graph.neighbors(entity_registry.resolve(s))) for s in supplements}
+    
+    # For each gene, get its pathways
+    # Find pathway overlaps between supplement pairs
+    overlaps = []
+    for s1, s2 in itertools.combinations(supplements, 2):
+        shared_pathways = set()
+        for g1 in supp_genes[s1]:
+            for g2 in supp_genes[s2]:
+                p1 = set(gene_pathways.get(g1, []))
+                p2 = set(gene_pathways.get(g2, []))
+                shared_pathways |= (p1 & p2)
+        if shared_pathways:
+            overlaps.append((s1, s2, shared_pathways))
+    return overlaps
 ```
 
 ---
 
-## Phase 6: Agent Surveillance Jobs (day 3-4)
+## Phase 3: OnSIDES Adverse Events (day 2)
 
-These fill gaps no static database covers. Three jobs, each a launchd-scheduled script.
+### 3a. Download OnSIDES v3.1.0
 
-### 6a. Supplement-supplement interaction scanner (daily)
+From GitHub (tatonetti-lab/onsides). Replaces frozen TWOSIDES (2012) + SIDER (2015).
 
-No database covers this. Agent scans biorxiv/pubmed for interaction evidence between specific pairs from our stack.
+Filter to: our 2 drugs (tirzepatide, naltrexone) + any supplement compounds that appear (likely sparse for supplements — most OnSIDES entries are prescription drugs).
+
+### 3b. Load into DuckDB
+
+`onsides_adverse_events` table. Combine with existing CAERS data.
+
+### 3c. Combination risk query
+
+```python
+def combination_adverse_events(compounds, onsides_db, caers_db):
+    """Find adverse events shared across compounds in the stack."""
+    # OnSIDES: drug-level AEs from FDA labels
+    # CAERS: product-level AE reports (live API)
+    # Cross-reference: compounds sharing the same AE term
+```
+
+**Evidence class:** OnSIDES edges are `evidence_class='label_derived'`, CAERS edges are `evidence_class='spontaneous_report'`. Keep these separate in the graph — don't mix confidence levels.
+
+---
+
+## Phase 4: DisGeNET Gene-Disease (day 2-3, conditional)
+
+### 4a. Assess marginal value first
+
+Open Targets is already mirrored (50GB). DisGeNET's unique value over Open Targets:
+- Curated gene-disease associations from literature (vs Open Targets' GWAS/L2G statistical associations)
+- Evidence scoring (GDA score)
+
+**Gate:** Before building the loader, check how many of our ~20 key genes have DisGeNET associations that Open Targets doesn't already cover. If overlap is >80%, skip this phase.
+
+### 4b. The HPO bridge problem
+
+DisGeNET uses UMLS disease IDs. Our phenotype system uses HPO codes. The Phase 5b Cypher query from v1 was invalid — DisGeNET doesn't have HPO-coded phenotypes.
+
+**Fix:** Use MONDO ontology as the bridge. MONDO maps UMLS → OMIM → HPO. Load MONDO mappings into `entity_registry.json` disease entries. The diagnostic differential query then joins through MONDO:
 
 ```
-Schedule: daily, 6am
-Script: selve/scripts/agents/scan_supplement_interactions.py
-Method: search_preprints + Exa for each pair in our 153-pair matrix (batched, ~20 pairs/day rotating)
-Output: append to Neo4j as :LITERATURE_EVIDENCE edges with PMID, date, confidence
-Cost: ~$0.50/day
+Gene → (DisGeNET, UMLS disease ID) → (MONDO bridge) → (HPO phenotype) → your phenotypes
 ```
 
-### 6b. Mechanism predication extractor (weekly)
+### 4c. Free academic API
 
-Focused SemMedDB replacement. For our 30 supplement compounds, extract "compound VERB target" from new PubMed abstracts.
+Register for free academic key at disgenet.com. Pull curated associations for our gene list. Load into DuckDB with `evidence_class='curated_association'`.
+
+---
+
+## Phase 5: Agent Surveillance Jobs (day 3-4)
+
+### Key change from v1: staging layer
+
+Agent-extracted edges go into `selve/indexed/pending_edges.duckdb`, NOT the main graph. Human reviews and promotes via a simple CLI tool. This satisfies the epistemic discipline requirement.
+
+### 5a. Supplement-interaction scanner (weekly, not daily)
+
+**Corrected math:** 18 items in stack (16 supplements + 2 drugs) → C(18,2) = 153 pairs. At 20 pairs per run, full sweep takes ~8 runs. Weekly cadence = full sweep every ~2 months. NOT 24h freshness — that was mathematically impossible.
 
 ```
 Schedule: weekly, Saturday
+Script: selve/scripts/agents/scan_supplement_interactions.py
+Method: search_preprints + Exa for rotating batch of 20 pairs
+Output: append to pending_edges.duckdb with PMID, date, confidence
+Cost: ~$0.50/week
+```
+
+### 5b. Mechanism predication extractor (biweekly)
+
+Focused SemMedDB replacement. For 30 supplement compounds, extract "compound VERB target" from recent PubMed abstracts.
+
+```
+Schedule: biweekly, 1st and 15th
 Script: selve/scripts/agents/extract_mechanism_triples.py
-Method: search_papers for each compound (last 7 days), LLM extraction of subject-predicate-object
-Output: append to Neo4j as edges with PMID provenance
-Cost: ~$1/week
+Method: search_papers for each compound (last 14 days), LLM extraction of subject-predicate-object
+Output: append to pending_edges.duckdb with PMID provenance
+Cost: ~$1/run
 ```
 
-### 6c. GWAS association updater (monthly)
+### 5c. GWAS association updater (quarterly)
 
-GWAS Catalog updates quarterly. Check for new associations for our 168 rsIDs.
+GWAS Catalog updates quarterly. Align check cadence with source cadence.
 
 ```
-Schedule: monthly, 1st
+Schedule: quarterly (matches GWAS Catalog release cycle)
 Script: genomics/scripts/update_gwas_associations.py (extends modal_gwas_catalog.py)
 Method: re-download GWAS Catalog, diff against previous, flag new associations
-Output: new :GWASAssociation edges in Neo4j + alert file
+Output: alert file + new associations in pending_edges.duckdb
 Cost: ~$0 (free API)
+```
+
+### 5d. Edge review CLI
+
+```bash
+# Review pending edges
+uv run python3 scripts/review_pending_edges.py list       # show pending
+uv run python3 scripts/review_pending_edges.py approve 42  # promote to main graph
+uv run python3 scripts/review_pending_edges.py reject 42   # discard with reason
 ```
 
 ---
 
-## Phase 7: Query Layer + MCP (day 4-5)
+## Phase 6: Query Layer (day 4)
 
-### 7a. Python query module
+### 6a. Extend pgx.py
 
-`selve/src/selve/biograph.py` — typed query functions wrapping Cypher:
+Add typed query functions to the existing `selve/src/selve/pgx.py` PgxGraph class:
 
 ```python
-def supplement_gene_interactions(supplements: list[str]) -> list[Interaction]
-def pathway_convergence(supplements: list[str]) -> list[PathwayOverlap]
-def variant_drug_risks(variants: list[str]) -> list[RiskSignal]
-def diagnostic_differential(phenotypes: list[str], genes: list[str]) -> list[Diagnosis]
-def combination_adverse_events(compounds: list[str]) -> list[CombinationAE]
+def supplement_gene_interactions(self, supplements: list[str]) -> list[dict]
+def pathway_convergence(self, supplements: list[str]) -> list[dict]
+def combination_adverse_events(self, compounds: list[str]) -> list[dict]
+def diagnostic_differential(self, phenotypes: list[str]) -> list[dict]
 ```
 
-### 7b. MCP tool (optional, Phase 2+)
+All queries use NetworkX graph operations. No new engine needed.
 
-Expose key queries as MCP tools for agent access. Low priority — scripts + Cypher shell are fine initially.
+### 6b. Evidence class filtering
 
-### 7c. Notebook / dashboard
+Every query function accepts an `evidence_classes` parameter defaulting to `['curated_interaction', 'curated_causal', 'curated_association']`. Agent-extracted edges (`evidence_class='literature_extraction'`) are excluded by default — opt-in only.
 
-Jupyter notebook for interactive exploration: `selve/notebooks/biograph-explorer.ipynb`
-Shows: personal interaction matrix, pathway convergence heatmap, risk surface.
+### 6c. Notebook (optional)
+
+`selve/notebooks/biograph-explorer.ipynb` for interactive exploration. Low priority — CLI queries are fine initially.
 
 ---
 
@@ -264,55 +312,55 @@ Shows: personal interaction matrix, pathway convergence heatmap, risk surface.
 | Source | Frequency | Method | Automated? |
 |--------|-----------|--------|------------|
 | SIGNOR | Quarterly | `fetch_signor.py` (existing) | Semi — run manually |
-| CTD | Monthly | Manual download (CAPTCHA) + `load_ctd.py` | No — CAPTCHA blocks |
-| Reactome | Quarterly | Download dump or REST API | Semi |
+| CTD | Quarterly | Manual download or Playwright | Semi (investigate automation) |
+| Reactome | N/A | Using `gene_pathway_mappings.json` instead | N/A |
 | OnSIDES | Quarterly | GitHub release download | Semi |
-| DisGeNET | Quarterly | API pull | Yes (script) |
-| HPO | Bimonthly | GitHub release download | Yes (script) |
+| DisGeNET | Quarterly | API pull (if Phase 4 passes gate) | Yes (script) |
+| HPO/MONDO | Bimonthly | GitHub release download | Yes (script) |
 | GWAS Catalog | Quarterly | `modal_gwas_catalog.py` (existing) | Yes |
 | CAERS | Continuous | `openfda_caers.py` (existing) | Yes (live API) |
-| Supplement interactions | Daily | Agent scan | Yes (launchd) |
-| Mechanism triples | Weekly | Agent extraction | Yes (launchd) |
-| New GWAS hits | Monthly | Agent check | Yes (launchd) |
+| Supplement interactions | Weekly | Agent scan → pending_edges | Yes (launchd) |
+| Mechanism triples | Biweekly | Agent extraction → pending_edges | Yes (launchd) |
 
 ---
 
 ## Phase Sequence & Dependencies
 
 ```
-Phase 1 (Neo4j + personal) ─── no dependencies, start here
+Phase 0 (Entity Registry) ─── prerequisite for everything
   │
-  ├── Phase 2 (CTD) ─── needs Neo4j running + manual CTD download
+  ├── Phase 1 (CTD) ─── needs entity registry for compound ID mapping
   │
-  ├── Phase 3 (Reactome) ─── needs Neo4j; check if gene_pathway_mappings.json suffices first
+  ├── Phase 2 (Pathways) ─── uses existing gene_pathway_mappings.json
   │
-  ├── Phase 4 (OnSIDES) ─── needs Neo4j
+  ├── Phase 3 (OnSIDES) ─── independent
   │
-  └── Phase 5 (DisGeNET) ─── needs Neo4j + free API key registration
+  └── Phase 4 (DisGeNET) ─── conditional on value gate + MONDO bridge
         │
-        └── Phase 6 (Agents) ─── needs graph populated for edge insertion
+        └── Phase 5 (Agents) ─── needs graph populated, writes to staging
               │
-              └── Phase 7 (Query layer) ─── needs all data loaded
+              └── Phase 6 (Query layer) ─── extends existing pgx.py
 ```
 
-Phases 2-5 are independent of each other (parallelize). Phase 6 needs the graph populated. Phase 7 wraps up.
+Phases 1-4 are independent of each other (parallelize after Phase 0).
 
 ---
 
 ## What NOT to Do
 
-- **Don't load full CTD** (94M rows). Filter to our compounds + genes first.
-- **Don't load full Reactome dump**. Check if `gene_pathway_mappings.json` is sufficient first.
-- **Don't build a web UI**. Cypher shell + Python queries + notebook is enough.
-- **Don't migrate variant lakehouse to Neo4j**. DuckDB on Parquet is the right tool for columnar VCF queries.
-- **Don't automate CTD download** — CAPTCHA blocks it. Manual monthly download is fine.
-- **Don't build an "interaction checker" tool** — the graph IS the tool. Write queries, not wrappers.
+- **Don't add a new graph engine** (Neo4j, Kùzu, or duckdb-pgq). DuckDB + NetworkX is sufficient and proven.
+- **Don't load full CTD** (94M rows). Filter via entity registry.
+- **Don't load Reactome dump**. Use existing `gene_pathway_mappings.json`.
+- **Don't let agents write directly to the main graph**. Staging layer + human review.
+- **Don't build a launchd CAPTCHA reminder**. Either automate CTD download or accept quarterly manual refresh.
+- **Don't assume identifier alignment**. Entity registry first, load data second.
+- **Don't mix evidence classes in graph queries**. Curated vs association vs spontaneous report vs LLM-extracted have different confidence levels.
 
 ## Success Criteria
 
-After all phases:
-1. `supplement_gene_interactions(["ashwagandha", "NAC", "saffron"])` returns which of your variant-affected genes each compound touches
-2. `pathway_convergence(my_stack)` identifies supplements converging on the same pathway
-3. `combination_adverse_events(["LDN", "melatonin"])` returns combination AE signals
-4. `diagnostic_differential(my_hpo_codes, my_genes)` suggests conditions not yet ruled out
-5. Agent jobs surface new interaction evidence within 24h of publication
+1. Entity registry covers ≥90% of stack compounds with at least one cross-database ID
+2. `supplement_gene_interactions(my_stack)` returns CTD interactions filtered to personal variant genes
+3. `pathway_convergence(my_stack)` identifies supplements converging on shared pathways using existing JSON
+4. `combination_adverse_events(["LDN", "melatonin"])` returns combination AE signals from OnSIDES + CAERS
+5. Agent jobs populate `pending_edges.duckdb` on schedule; zero unreviewed edges in main graph
+6. Total new dependencies: 0 (all in existing DuckDB + NetworkX + Python stdlib)
