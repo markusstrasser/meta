@@ -1,6 +1,6 @@
 {
   "name": "research-api-benchmark",
-  "project": "meta",
+  "project": "agent-infra",
   "description": "Run the same genomics research prompt with 3 different tool strategies to compare API quality. 15 turns each, ~$15 total.",
   "steps": [
     {
