@@ -2,6 +2,15 @@
 
 Read-only investigation. No files deleted, moved, or rewritten. Generated 2026-07-14.
 
+> **CORRECTION 2026-07-14 (post-verification): the publishing rewrite is NOT worth doing — do not run §1's command.**
+> The 227 MiB "dead" figure was computed against `main`'s HEAD only. publishing has **39 refs incl. ~30
+> design-experiment branches** (`design/v1-editorial`, `v2-quiet`, `v3-warm`, `design-refresh-bold`…). Recomputing
+> "dead" against ALL ref tips: **42 of the 123 media blobs the main-only calc flagged are LIVE in a design branch**
+> — the §1 command would have deleted images from your design experiments. Genuinely-dead-at-all-tips media is only
+> **81 blobs / 41 MiB**. Rewriting all 39 refs (every design-branch SHA changes) to reclaim ~41 MiB is a bad trade
+> with real taste-data risk. VERDICT: skip. (Also: stripping ALL 2680 "dead" blobs as §1 literally says would destroy
+> the revision history of every edited .svelte/.svx/.md/.ts/.css — the dossier's "museum-JPEG only" framing was wrong.)
+
 ## Per-repo totals
 
 | Repo | Working tree | .git | Notes |
